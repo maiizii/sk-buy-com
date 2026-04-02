@@ -96,14 +96,14 @@ export default function ForumHome() {
 
   if (loading) {
     return (
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <main className="w-full py-12">
         <div className="text-center text-muted font-mono animate-pulse">加载中...</div>
       </main>
     );
   }
 
   return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <main className="w-full py-8 space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

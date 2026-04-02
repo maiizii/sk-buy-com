@@ -2,21 +2,17 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Terminal,
   Plus,
   Pencil,
   Trash2,
-  LogOut,
   X,
   Save,
-  ArrowLeft,
   Shield,
   Loader2,
   Radio,
   Zap,
   MessageCircle,
 } from "lucide-react";
-import { ThemeToggle } from "@/components/ThemeToggle";
 
 // ============================================================
 // Types
@@ -650,37 +646,25 @@ export default function AdminPage() {
 
   // Admin dashboard
   return (
-    <div className="min-h-screen relative z-10">
-      {/* Header */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-[var(--background)]/80 border-b border-[var(--border-color)]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <a href="/" className="flex items-center gap-1.5 text-muted hover:text-[var(--accent)] transition-colors">
-              <ArrowLeft className="w-4 h-4" />
-              <span className="text-xs font-mono hidden sm:inline">首页</span>
-            </a>
-            <div className="w-px h-6 bg-[var(--border-color)]" />
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--accent)]/15 border border-[var(--accent)]/20">
-                <Terminal className="w-4 h-4 text-[var(--accent)]" />
-              </div>
-              <h1 className="text-sm font-bold font-mono">管理后台</h1>
-            </div>
+    <div className="relative z-10 space-y-6 py-8">
+      <section className="shell-panel">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
+              Admin workspace
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight">管理后台</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              已登录管理员：{user.username}，可在此管理平台与论坛板块。
+            </p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted font-mono">
-              {user.username}
-            </span>
-            <ThemeToggle />
-            <button onClick={handleLogout} className="btn-glass p-2" title="登出">
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
+          <button onClick={handleLogout} className="btn-glass">
+            退出登录
+          </button>
         </div>
-      </header>
+      </section>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <main className="space-y-6">
         {/* Stats Bar */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="admin-stat-card">

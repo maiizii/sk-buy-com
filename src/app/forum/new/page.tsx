@@ -88,7 +88,7 @@ function NewTopicForm() {
 
   if (!user) {
     return (
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <main className="w-full py-12">
         <div className="forum-card p-8 text-center">
           <p className="text-muted mb-4">请先登录后发帖</p>
           <Link href="/" className="btn-glass btn-glass-primary">
@@ -106,7 +106,7 @@ function NewTopicForm() {
       : categories.filter((c) => !c.readOnly);
 
   return (
-    <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <main className="w-full py-8 space-y-6">
       <Link
         href="/forum"
         className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground transition-colors"
@@ -237,7 +237,7 @@ export default function NewTopicPage() {
   return (
     <Suspense
       fallback={
-        <main className="max-w-3xl mx-auto px-4 py-12 text-center text-muted font-mono animate-pulse">
+        <main className="w-full py-12 text-center text-muted font-mono animate-pulse">
           加载中...
         </main>
       }

@@ -1,28 +1,24 @@
 "use client";
 
-import { Tracker, type TrackerBlockProps } from "@/components/Tracker";
-import { Navbar } from "@/components/Navbar";
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
-  Zap,
-  TrendingUp,
+  AlertTriangle,
+  ArrowRight,
   Award,
+  Clock3,
   ExternalLink,
   Gauge,
-  Clock,
-  Shield,
-  AlertTriangle,
   Heart,
-  SkullIcon,
-  EyeOff,
   MessageSquare,
+  Shield,
+  SkullIcon,
+  TrendingUp,
+  Zap,
 } from "lucide-react";
+import { Tracker, type TrackerBlockProps } from "@/components/Tracker";
 
-// ============================================================
-// Types
-// ============================================================
 interface Platform {
   id: string;
   name: string;
@@ -38,12 +34,6 @@ interface Platform {
   latency: number;
   joinDate: string;
   description: string;
-}
-
-interface UserInfo {
-  id: number;
-  username: string;
-  role: "user" | "admin";
 }
 
 interface ConnectivityLog {
@@ -69,25 +59,14 @@ interface ConnectivityData {
   };
 }
 
-// ============================================================
-// Tracker Data — from real connectivity logs (24 hourly nodes)
-// ============================================================
-function logsToTrackerData(
-  logs: ConnectivityLog[],
-  nodeCount: number = 24
-): TrackerBlockProps[] {
+function logsToTrackerData(logs: ConnectivityLog[], nodeCount: number = 24): TrackerBlockProps[] {
   const data: TrackerBlockProps[] = [];
-
-  // Fill empty nodes at the beginning if we have less than nodeCount logs
   const emptyCount = Math.max(0, nodeCount - logs.length);
+
   for (let i = 0; i < emptyCount; i++) {
-    data.push({
-      color: "bg-gray-600",
-      tooltip: "暂无数据",
-    });
+    data.push({ color: "bg-slate-300 dark:bg-slate-700", tooltip: "暂无数据" });
   }
 
-  // Fill with actual log data
   for (const log of logs) {
     const time = new Date(log.checkedAt + "Z").toLocaleTimeString("zh-CN", {
       hour: "2-digit",
@@ -96,442 +75,277 @@ function logsToTrackerData(
 
     if (log.success) {
       if (log.latency > 1500) {
-        data.push({
-          color: "bg-yellow-500",
-          tooltip: `${time} · 高延迟 ${log.latency}ms`,
-        });
+        data.push({ color: "bg-amber-400", tooltip: `${time} · 高延迟 ${log.latency}ms` });
       } else {
-        data.push({
-          color: "bg-emerald-500",
-          tooltip: `${time} · 正常 ${log.latency}ms`,
-        });
+        data.push({ color: "bg-emerald-500", tooltip: `${time} · 正常 ${log.latency}ms` });
       }
     } else {
-      data.push({
-        color: "bg-red-500",
-        tooltip: `${time} · ${log.errorMessage || "连接失败"}`,
-      });
+      data.push({ color: "bg-rose-500", tooltip: `${time} · ${log.errorMessage || "连接失败"}` });
     }
   }
 
   return data;
 }
 
-/**
- * Generate grey placeholder tracker data for unmonitored platforms
- */
 function generateGreyTrackerData(nodeCount: number = 24): TrackerBlockProps[] {
   return Array.from({ length: nodeCount }, () => ({
-    color: "bg-gray-500/30",
+    color: "bg-slate-200 dark:bg-slate-700/70",
     tooltip: "未启用连通监控",
   }));
 }
 
-// ============================================================
-// Helper components
-// ============================================================
 function TagIcon({ type }: { type: string }) {
   switch (type) {
     case "premium":
-      return <Shield className="w-3 h-3" />;
+      return <Shield className="h-3.5 w-3.5" />;
     case "free":
-      return <Heart className="w-3 h-3" />;
+      return <Heart className="h-3.5 w-3.5" />;
     case "stable":
-      return <Activity className="w-3 h-3" />;
+      return <Activity className="h-3.5 w-3.5" />;
     case "dead":
-      return <SkullIcon className="w-3 h-3" />;
+      return <SkullIcon className="h-3.5 w-3.5" />;
     default:
       return null;
   }
 }
 
-function LatencyDisplay({ ms }: { ms: number }) {
-  let color = "text-emerald-400";
-  let bgColor = "bg-emerald-400/10";
-  if (ms > 1500) {
-    color = "text-red-400";
-    bgColor = "bg-red-400/10";
-  } else if (ms > 500) {
-    color = "text-yellow-400";
-    bgColor = "bg-yellow-400/10";
-  }
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono text-sm ${color} ${bgColor}`}
-    >
-      <Zap className="w-3 h-3" />
-      {ms.toLocaleString()}ms
-    </span>
-  );
-}
-
-function UptimePercentage({ value }: { value: number }) {
-  let color = "text-emerald-400";
-  if (value < 50) color = "text-red-400";
-  else if (value < 90) color = "text-yellow-400";
-  else if (value < 98) color = "text-blue-400";
-
-  return (
-    <span className={`font-mono text-sm font-semibold ${color}`}>{value}%</span>
-  );
-}
-
-// ============================================================
-// KPI Card Component
-// ============================================================
 function KpiCard({
   icon: Icon,
   label,
   value,
   sub,
-  index,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   sub: string;
-  index: number;
 }) {
   return (
-    <div className={`kpi-card animate-fade-in-up stagger-${index + 1}`}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/10">
-          <Icon className="w-4 h-4 text-[var(--accent)]" />
+    <div className="kpi-card">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">{label}</p>
+          <div className="mt-3 flex items-end gap-2">
+            <span className="text-3xl font-semibold tracking-tight">{value}</span>
+            <span className="pb-1 text-sm text-[var(--muted)]">{sub}</span>
+          </div>
         </div>
-        <span className="text-xs font-medium text-muted tracking-wide uppercase">
-          {label}
-        </span>
-      </div>
-      <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-bold font-mono tracking-tight">
-          {value}
-        </span>
-        <span className="text-xs text-muted">{sub}</span>
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent-strong)]">
+          <Icon className="h-5 w-5" />
+        </div>
       </div>
     </div>
   );
 }
 
-// ============================================================
-// Main Page Component
-// ============================================================
 export default function Home() {
-  const [refreshTime, setRefreshTime] = useState("--:--:--");
+  const [refreshTime, setRefreshTime] = useState("--:--");
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [loading, setLoading] = useState(true);
   const [connectivity, setConnectivity] = useState<ConnectivityData>({});
 
-  // Fetch platforms from API
   useEffect(() => {
     fetch("/api/platforms")
       .then((r) => r.json())
       .then((data) => {
-        if (data.success) {
-          setPlatforms(data.data);
-        }
+        if (data.success) setPlatforms(data.data);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
-  // Fetch connectivity data
   useEffect(() => {
-    function fetchConnectivity() {
+    const fetchConnectivity = () => {
       fetch("/api/connectivity")
         .then((r) => r.json())
         .then((data) => {
-          if (data.success) {
-            setConnectivity(data.data);
-          }
+          if (data.success) setConnectivity(data.data);
         })
         .catch(console.error);
-    }
+    };
 
     fetchConnectivity();
-    // Refresh connectivity data every 60 seconds
     const interval = setInterval(fetchConnectivity, 60000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    setRefreshTime(new Date().toLocaleTimeString("zh-CN"));
-    const timer = setInterval(() => {
-      setRefreshTime(new Date().toLocaleTimeString("zh-CN"));
-    }, 60000);
+    const updateTime = () =>
+      setRefreshTime(
+        new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+      );
+    updateTime();
+    const timer = setInterval(updateTime, 60000);
     return () => clearInterval(timer);
   }, []);
 
-  // Compute KPIs — use real connectivity data when available
-  const getEffectiveUptime = (p: Platform): number => {
+  const getEffectiveUptime = (p: Platform) => {
     const c = connectivity[p.id];
     if (c && c.summary.totalChecks > 0) return c.summary.uptime;
     return p.uptime;
   };
 
-  const getEffectiveLatency = (p: Platform): number => {
+  const getEffectiveLatency = (p: Platform) => {
     const c = connectivity[p.id];
     if (c && c.summary.totalChecks > 0) return c.summary.avgLatency;
     return p.latency;
   };
 
-  const avgUptime =
-    platforms.length > 0
-      ? (
-          platforms.reduce((sum, p) => sum + getEffectiveUptime(p), 0) /
-          platforms.length
-        ).toFixed(1)
-      : "0";
+  const stats = useMemo(() => {
+    const count = platforms.length;
+    const monitoredCount = platforms.filter((p) => p.monitorEnabled).length;
+    const avgUptime =
+      count > 0
+        ? (platforms.reduce((sum, p) => sum + getEffectiveUptime(p), 0) / count).toFixed(1)
+        : "0";
+    const avgLatency =
+      count > 0
+        ? Math.round(
+            platforms.reduce((sum, p) => sum + getEffectiveLatency(p), 0) / count
+          ).toLocaleString()
+        : "0";
+    const bestValue =
+      count > 0
+        ? platforms.reduce((best, p) => {
+            if (p.tag === "dead") return best;
+            const up = getEffectiveUptime(p);
+            const lat = getEffectiveLatency(p) || 1;
+            const bestUp = getEffectiveUptime(best);
+            const bestLat = getEffectiveLatency(best) || 1;
+            return up / lat > bestUp / bestLat ? p : best;
+          }, platforms[0])?.name || "--"
+        : "--";
 
-  const avgLatency =
-    platforms.length > 0
-      ? Math.round(
-          platforms.reduce((sum, p) => sum + getEffectiveLatency(p), 0) /
-            platforms.length
-        ).toLocaleString()
-      : "0";
-
-  const bestValue =
-    platforms.length > 0
-      ? platforms.reduce((best, p) => {
-          if (p.tag === "dead") return best;
-          const up = getEffectiveUptime(p);
-          const lat = getEffectiveLatency(p) || 1;
-          const bestUp = getEffectiveUptime(best);
-          const bestLat = getEffectiveLatency(best) || 1;
-          return up / lat > bestUp / bestLat ? p : best;
-        }, platforms[0])?.name || "--"
-      : "--";
-
-  // Count monitored platforms
-  const monitoredCount = platforms.filter((p) => p.monitorEnabled).length;
+    return { count, monitoredCount, avgUptime, avgLatency, bestValue };
+  }, [platforms, connectivity]);
 
   return (
-    <div className="relative z-10 min-h-screen">
-      <Navbar />
-
-      {/* ===== Main Content ===== */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            icon={Activity}
-            label="收录平台"
-            value={String(platforms.length)}
-            sub="家"
-            index={0}
-          />
-          <KpiCard
-            icon={TrendingUp}
-            label="平均连通率"
-            value={avgUptime}
-            sub="%"
-            index={1}
-          />
-          <KpiCard
-            icon={Zap}
-            label="平均延迟"
-            value={avgLatency}
-            sub="ms"
-            index={2}
-          />
-          <KpiCard
-            icon={Award}
-            label="最佳性价比"
-            value={bestValue}
-            sub=""
-            index={3}
-          />
-        </div>
-
-        {/* ===== Data Table Card ===== */}
-        <div className="animate-fade-in-up rounded-xl border border-[var(--border-color)] bg-[var(--card)] overflow-hidden">
-          {/* Table Header Bar */}
-          <div className="px-6 py-4 border-b border-[var(--border-color)] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Gauge className="w-4 h-4 text-[var(--accent)]" />
-              <h2 className="text-sm font-semibold tracking-wide">
-                平台对比数据看板
-              </h2>
-              <span className="text-xs text-muted font-mono">实时更新</span>
-              {monitoredCount > 0 && (
-                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  {monitoredCount} 个平台监控中
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted font-mono">
-              <Clock className="w-3 h-3" />
-              <span>最近刷新: {refreshTime}</span>
+    <div className="space-y-6">
+      <section className="shell-panel overflow-hidden bg-gradient-to-br from-[var(--card)] via-[var(--card)] to-[var(--accent-soft)]/40">
+        <div className="grid gap-8 lg:grid-cols-[1.4fr_0.9fr] lg:items-center">
+          <div>
+            <span className="inline-flex items-center rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent-strong)]">
+              Materio 风格仪表盘改版
+            </span>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">
+              AI API 中转站数据总览与社区入口
+            </h2>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--muted)] sm:text-base">
+              对比平台计费倍率、24 小时连通率、平均延迟与用户点评，默认浅色风格，支持一键切换深色模式。
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link href="/forum" className="btn-glass btn-glass-primary">
+                进入社区论坛
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link href="/admin" className="btn-glass">
+                打开管理后台
+              </Link>
             </div>
           </div>
 
-          {/* Table */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <KpiCard icon={Activity} label="收录平台" value={String(stats.count)} sub="家" />
+            <KpiCard icon={TrendingUp} label="平均连通率" value={stats.avgUptime} sub="%" />
+            <KpiCard icon={Zap} label="平均延迟" value={stats.avgLatency} sub="ms" />
+            <KpiCard icon={Award} label="最佳性价比" value={stats.bestValue} sub="" />
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-6">
+        <div className="admin-card overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] px-6 py-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-[var(--accent-strong)]" />
+                <h3 className="text-base font-semibold">平台对比看板</h3>
+              </div>
+              <p className="mt-1 text-sm text-[var(--muted)]">展示计费倍率、监控状态和可用性趋势</p>
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent-strong)]">
+              <Clock3 className="h-3.5 w-3.5" />
+              最近刷新 {refreshTime}
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             {loading ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="text-sm text-muted font-mono animate-pulse">
-                  加载中...
-                </div>
-              </div>
+              <div className="px-6 py-20 text-center text-sm text-[var(--muted)]">加载中...</div>
             ) : platforms.length === 0 ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="text-sm text-muted font-mono">
-                  暂无平台数据
-                </div>
-              </div>
+              <div className="px-6 py-20 text-center text-sm text-[var(--muted)]">暂无平台数据</div>
             ) : (
-              <table className="w-full text-sm" id="platform-table">
+              <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="border-b border-[var(--border-color)] bg-[var(--card)]">
-                    <th className="text-left px-6 py-3 text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">
-                      平台名称
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">
-                      计费倍率
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">
-                      主打模型
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-[320px]">
-                      🟢 24h 连通率
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">
-                      ⚡ 延迟
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">
-                      加入时间
-                    </th>
-                    <th className="text-right px-6 py-3 text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">
-                      操作
-                    </th>
+                  <tr className="border-b border-[var(--border-color)] text-left text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                    <th className="px-6 py-4">平台</th>
+                    <th className="px-4 py-4">倍率</th>
+                    <th className="px-4 py-4">模型</th>
+                    <th className="px-4 py-4 min-w-[280px]">连通率</th>
+                    <th className="px-4 py-4">延迟</th>
+                    <th className="px-6 py-4 text-right">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[var(--border-color)]">
-                  {platforms.map((p, idx) => {
+                <tbody>
+                  {platforms.map((p) => {
                     const hasMonitor = p.monitorEnabled;
                     const connData = connectivity[p.id];
                     const effectiveUptime = getEffectiveUptime(p);
                     const effectiveLatency = getEffectiveLatency(p);
-
-                    // Build tracker data
                     const trackerData = hasMonitor && connData
                       ? logsToTrackerData(connData.logs, 24)
                       : hasMonitor
-                        ? logsToTrackerData([], 24) // Monitor enabled but no data yet
+                        ? logsToTrackerData([], 24)
                         : generateGreyTrackerData(24);
 
                     return (
-                      <tr
-                        key={p.id}
-                        id={`platform-${p.id}`}
-                        className={`table-row-hover animate-fade-in-up stagger-${idx + 1}`}
-                      >
-                        {/* Platform Name */}
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col gap-1.5">
+                      <tr key={p.id} className="table-row-hover border-b border-[var(--border-color)] last:border-b-0">
+                        <td className="px-6 py-4 align-top">
+                          <div className="space-y-1.5">
                             <div className="flex items-center gap-2">
-                              <span className="font-semibold font-mono text-sm">
-                                {p.name}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">{p.name}</span>
                               <span className={`badge badge-${p.tag}`}>
                                 <TagIcon type={p.tag} />
                                 {p.tagLabel}
                               </span>
-                              <span className="text-xs text-muted font-mono">
-                                {p.url}
-                              </span>
                             </div>
+                            <p className="text-xs text-[var(--muted)]">{p.url}</p>
                           </div>
                         </td>
-
-                        {/* Billing Rate */}
-                        <td className="px-4 py-4">
-                          <span
-                            className={`font-mono text-sm font-bold ${p.billingColor}`}
-                          >
-                            {p.billingRate}
-                          </span>
+                        <td className="px-4 py-4 align-top">
+                          <span className={`font-semibold ${p.billingColor}`}>{p.billingRate}</span>
                         </td>
-
-                        {/* Models */}
-                        <td className="px-4 py-4">
-                          <div className="flex flex-wrap gap-1">
-                            {p.models.map((model) => (
-                              <span
-                                key={model}
-                                className="inline-block px-2 py-0.5 rounded-md bg-[var(--border-color)] text-xs font-mono whitespace-nowrap"
-                              >
+                        <td className="px-4 py-4 align-top">
+                          <div className="flex flex-wrap gap-1.5">
+                            {p.models.slice(0, 3).map((model) => (
+                              <span key={model} className="forum-tag">
                                 {model}
                               </span>
                             ))}
                           </div>
                         </td>
-
-                        {/* Uptime Tracker */}
-                        <td className="px-4 py-4">
-                          <div className={`flex flex-col gap-1.5 ${!hasMonitor ? "opacity-40" : ""}`}>
-                            <div className="flex items-center justify-between">
-                              <UptimePercentage value={effectiveUptime} />
-                              {!hasMonitor && (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-muted font-mono">
-                                  <EyeOff className="w-3 h-3" />
-                                  未监控
-                                </span>
-                              )}
-                              {hasMonitor && connData && connData.summary.lastCheck && (
-                                <span className="text-[10px] text-muted font-mono">
-                                  {new Date(connData.summary.lastCheck + "Z").toLocaleTimeString("zh-CN", {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })}
-                                </span>
-                              )}
+                        <td className="px-4 py-4 align-top">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-[var(--accent-strong)]">{effectiveUptime}%</span>
+                              <span className="text-[var(--muted)]">{hasMonitor ? "监控中" : "未监控"}</span>
                             </div>
-                            <Tracker
-                              data={trackerData}
-                              className="h-5"
-                              hoverEffect={hasMonitor}
-                            />
+                            <Tracker data={trackerData} className="h-5" hoverEffect={hasMonitor} />
                           </div>
                         </td>
-
-                        {/* Latency */}
-                        <td className="px-4 py-4">
-                          <div className={!hasMonitor ? "opacity-40" : ""}>
-                            <LatencyDisplay ms={effectiveLatency} />
-                          </div>
-                        </td>
-
-                        {/* Join Date */}
-                        <td className="px-4 py-4">
-                          <span className="text-xs text-muted font-mono">
-                            {p.joinDate}
+                        <td className="px-4 py-4 align-top">
+                          <span className="inline-flex rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent-strong)]">
+                            {Math.round(effectiveLatency)}ms
                           </span>
                         </td>
-
-                        {/* Actions */}
-                        <td className="px-6 py-4">
-                          <div className="flex items-center justify-end gap-2">
-                            <a
-                              href={`https://${p.url}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="btn-glass btn-glass-primary"
-                              id={`buy-${p.id}`}
-                            >
-                              <ExternalLink className="w-3 h-3" />
+                        <td className="px-6 py-4 align-top text-right">
+                          <div className="flex justify-end gap-2">
+                            <a href={`https://${p.url}`} target="_blank" rel="noreferrer" className="btn-glass">
+                              <ExternalLink className="h-3.5 w-3.5" />
                               访问
                             </a>
-                            <Link
-                              href={`/forum/tag/${p.id}`}
-                              className="btn-glass"
-                              id={`review-${p.id}`}
-                            >
-                              <MessageSquare className="w-3 h-3" />
+                            <Link href={`/forum/tag/${p.id}`} className="btn-glass btn-glass-primary">
+                              <MessageSquare className="h-3.5 w-3.5" />
                               点评
                             </Link>
                           </div>
@@ -545,18 +359,38 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ===== Footer ===== */}
-        <footer className="text-center py-8 text-xs text-muted font-mono space-y-1">
-          <p>
-            <span className="text-[var(--accent)]">sk-buy.com</span> · AI API
-            中转站评测聚合平台
-          </p>
-          <p className="flex items-center justify-center gap-1">
-            <AlertTriangle className="w-3 h-3" />
-            数据仅供参考，不构成购买建议。评测数据每 60 秒自动刷新。
-          </p>
-        </footer>
-      </main>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="shell-panel">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">监控摘要</p>
+            <div className="mt-4 space-y-4">
+              <div className="flex items-center justify-between rounded-2xl bg-[var(--accent-soft)] px-4 py-4">
+                <div>
+                  <p className="text-sm font-medium">已启用监控</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">每分钟自动拉取摘要</p>
+                </div>
+                <span className="text-2xl font-semibold text-[var(--accent-strong)]">{stats.monitoredCount}</span>
+              </div>
+              <div className="rounded-2xl border border-dashed border-[var(--border-color)] px-4 py-4">
+                <p className="text-sm font-medium">最佳性价比平台</p>
+                <p className="mt-2 text-lg font-semibold">{stats.bestValue}</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">综合 uptime / latency 简单计算，仅供参考。</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="shell-panel">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <p className="text-sm font-semibold">说明</p>
+            </div>
+            <ul className="mt-4 space-y-3 text-sm leading-6 text-[var(--muted)]">
+              <li>• 数据仅作参考，不构成购买建议。</li>
+              <li>• 可用性、延迟与费用请结合官方信息交叉验证。</li>
+              <li>• 首页表格现在独占整行，避免被右侧摘要卡压缩。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

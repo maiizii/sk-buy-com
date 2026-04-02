@@ -78,7 +78,7 @@ export default function CategoryPage({
   }, [categoryId, page, sort]);
 
   return (
-    <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <main className="w-full py-8 space-y-6">
       {/* Back + Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

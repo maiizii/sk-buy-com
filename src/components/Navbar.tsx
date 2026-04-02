@@ -1,16 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Terminal,
-  Settings,
+  ChevronDown,
+  ChevronRight,
+  LayoutDashboard,
   LogOut,
   Menu,
-  X,
+  MessageCircle,
+  MessageSquare,
+  Settings,
+  Shield,
+  Sparkles,
+  Terminal,
   User,
-  ChevronDown,
+  X,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { AuthModal } from "./AuthModal";
@@ -22,11 +28,16 @@ interface UserInfo {
   role: "user" | "admin";
 }
 
-const NAV_ITEMS = [
-  { label: "SK首页", href: "/", exact: true },
-  { label: "福利羊毛", href: "/forum/c/welfare" },
-  { label: "社区论坛", href: "/forum" },
-  { label: "新手指南", href: "/forum/c/guide" },
+interface ForumCategory {
+  id: string;
+  name: string;
+}
+
+const PRIMARY_NAV = [
+  { label: "数据总览", href: "/", icon: LayoutDashboard, exact: true },
+  { label: "社区论坛", href: "/forum", icon: MessageCircle },
+  { label: "福利羊毛", href: "/forum/c/welfare", icon: Sparkles },
+  { label: "新手指南", href: "/forum/c/guide", icon: Shield },
 ];
 
 export function Navbar() {
@@ -37,6 +48,8 @@ export function Navbar() {
   const [authTab, setAuthTab] = useState<"login" | "register">("login");
   const [showDropdown, setShowDropdown] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [forumOpen, setForumOpen] = useState(true);
+  const [categories, setCategories] = useState<ForumCategory[]>([]);
 
   const checkAuth = useCallback(() => {
     fetch("/api/auth/me")
@@ -51,24 +64,45 @@ export function Navbar() {
 
   useEffect(() => {
     checkAuth();
+    fetch("/api/forum/categories")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setCategories(data.data.slice(0, 8));
+      })
+      .catch(() => setCategories([]));
   }, [checkAuth]);
 
-  // Close mobile menu on route change
   useEffect(() => {
     setMobileOpen(false);
     setShowDropdown(false);
   }, [pathname]);
 
+  useEffect(() => {
+    if (pathname.startsWith("/forum")) setForumOpen(true);
+  }, [pathname]);
+
+  const isActive = (href: string, exact?: boolean) => {
+    if (exact) return pathname === href;
+    return pathname.startsWith(href);
+  };
+
+  const forumCategoryLinks = useMemo(
+    () =>
+      categories.map((category) => ({
+        label: category.name,
+        href: `/forum/c/${category.id}`,
+      })),
+    [categories]
+  );
+
   const openLogin = () => {
     setAuthTab("login");
     setShowAuth(true);
-    setMobileOpen(false);
   };
 
   const openRegister = () => {
     setAuthTab("register");
     setShowAuth(true);
-    setMobileOpen(false);
   };
 
   const handleAuthSuccess = (u: { id: number; username: string; email: string; role: string }) => {
@@ -81,178 +115,162 @@ export function Navbar() {
     setShowDropdown(false);
   };
 
-  const isActive = (href: string, exact?: boolean) => {
-    if (exact) return pathname === href;
-    return pathname.startsWith(href);
-  };
-
   return (
     <>
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-[var(--background)]/80 border-b border-[var(--border-color)]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-          {/* Left: Logo + Nav Links */}
-          <div className="flex items-center gap-1">
-            {/* Logo */}
-            <Link href="/" className="flex items-center gap-2 mr-4 shrink-0">
-              <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-[var(--accent)]/15 border border-[var(--accent)]/20">
-                <Terminal className="w-3.5 h-3.5 text-[var(--accent)]" />
-              </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-base font-bold tracking-tight font-mono">
-                  sk-buy
-                </span>
-                <span className="text-[10px] text-muted font-mono">.com</span>
-              </div>
+      <div className="app-shell">
+        {mobileOpen && (
+          <button
+            type="button"
+            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+            onClick={() => setMobileOpen(false)}
+            aria-label="关闭侧边栏"
+          />
+        )}
+
+        <aside
+          className={`app-sidebar fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col p-4 transition-transform duration-300 ${
+            mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+          }`}
+        >
+          <div className="flex items-center justify-between px-2 py-2">
+            <Link href="/" className="flex items-center gap-3">
+              <span className="brand-logo">
+                <Terminal className="h-5 w-5" />
+              </span>
+              <span>
+                <span className="block text-sm font-semibold tracking-wide">sk-buy.com</span>
+                <span className="block text-xs text-[var(--muted)]">Materio style dashboard</span>
+              </span>
             </Link>
-
-            {/* Desktop Nav */}
-            <nav className="hidden md:flex items-center">
-              {NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`nav-link ${
-                    isActive(item.href, item.exact) ? "nav-link-active" : ""
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </div>
-
-          {/* Right: User Area */}
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-
-            {authChecked && !user && (
-              <div className="hidden sm:flex items-center gap-2">
-                <button onClick={openLogin} className="nav-auth-btn">
-                  登录
-                </button>
-                <button
-                  onClick={openRegister}
-                  className="nav-auth-btn nav-auth-btn-primary"
-                >
-                  注册
-                </button>
-              </div>
-            )}
-
-            {authChecked && user && (
-              <div className="relative hidden sm:block">
-                <button
-                  onClick={() => setShowDropdown(!showDropdown)}
-                  className="nav-user-btn"
-                >
-                  <div className="nav-avatar">
-                    <User className="w-3 h-3" />
-                  </div>
-                  <span className="text-xs font-mono max-w-[80px] truncate">
-                    {user.username}
-                  </span>
-                  <ChevronDown className="w-3 h-3 text-muted" />
-                </button>
-
-                {showDropdown && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowDropdown(false)}
-                    />
-                    <div className="nav-dropdown">
-                      <div className="px-3 py-2 border-b border-[var(--border-color)]">
-                        <p className="text-xs font-mono font-semibold truncate">
-                          {user.username}
-                        </p>
-                        <p className="text-[10px] text-muted">{user.email}</p>
-                      </div>
-                      {user.role === "admin" && (
-                        <Link
-                          href="/admin"
-                          className="nav-dropdown-item"
-                          onClick={() => setShowDropdown(false)}
-                        >
-                          <Settings className="w-3.5 h-3.5" />
-                          管理后台
-                        </Link>
-                      )}
-                      <button onClick={handleLogout} className="nav-dropdown-item w-full">
-                        <LogOut className="w-3.5 h-3.5" />
-                        退出登录
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Mobile hamburger */}
             <button
-              onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-[var(--border-color)] transition-colors"
+              type="button"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-[var(--muted)] hover:bg-[var(--accent-soft)] lg:hidden"
+              onClick={() => setMobileOpen(false)}
             >
-              {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              <X className="h-5 w-5" />
             </button>
           </div>
-        </div>
 
-        {/* Mobile menu */}
-        {mobileOpen && (
-          <div className="md:hidden border-t border-[var(--border-color)] bg-[var(--background)]">
-            <nav className="flex flex-col py-2">
-              {NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`mobile-nav-link ${
-                    isActive(item.href, item.exact) ? "mobile-nav-link-active" : ""
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+          <div className="mt-6 space-y-6 overflow-y-auto pr-1">
+            <div>
+              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]/80">
+                Navigation
+              </p>
+              <nav className="space-y-1.5">
+                {PRIMARY_NAV.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`sidebar-link ${isActive(item.href, item.exact) ? "sidebar-link-active" : ""}`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
 
-            {authChecked && !user && (
-              <div className="flex gap-2 px-4 py-3 border-t border-[var(--border-color)]">
-                <button onClick={openLogin} className="flex-1 nav-auth-btn justify-center">
-                  登录
-                </button>
                 <button
-                  onClick={openRegister}
-                  className="flex-1 nav-auth-btn nav-auth-btn-primary justify-center"
+                  type="button"
+                  className={`sidebar-link ${pathname.startsWith("/forum") ? "sidebar-link-active" : ""}`}
+                  onClick={() => setForumOpen((prev) => !prev)}
                 >
-                  注册
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="flex-1 text-left">论坛板块</span>
+                  {forumOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </button>
-              </div>
-            )}
 
-            {authChecked && user && (
-              <div className="px-4 py-3 border-t border-[var(--border-color)] space-y-2">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="nav-avatar">
-                    <User className="w-3 h-3" />
+                {forumOpen && (
+                  <div className="space-y-1">
+                    {forumCategoryLinks.length > 0 ? (
+                      forumCategoryLinks.map((item) => (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={`sidebar-sub-link ${isActive(item.href) ? "sidebar-sub-link-active" : ""}`}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                          <span>{item.label}</span>
+                        </Link>
+                      ))
+                    ) : (
+                      <div className="px-6 py-2 text-xs text-[var(--muted)]">正在加载板块...</div>
+                    )}
                   </div>
-                  <span className="text-sm font-mono">{user.username}</span>
-                </div>
-                {user.role === "admin" && (
-                  <Link href="/admin" className="mobile-nav-link">
-                    <Settings className="w-4 h-4" />
-                    管理后台
-                  </Link>
                 )}
-                <button onClick={handleLogout} className="mobile-nav-link w-full text-left">
-                  <LogOut className="w-4 h-4" />
-                  退出登录
-                </button>
-              </div>
-            )}
+              </nav>
+            </div>
           </div>
-        )}
-      </header>
+        </aside>
 
-      {/* Auth Modal */}
+        <div className="min-w-0 lg:ml-[192px]">
+          <header className="app-topbar sticky top-0 z-30">
+            <div className="flex h-[72px] items-center gap-3 px-4 sm:px-6 lg:px-8">
+              <button
+                type="button"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--card)] text-[var(--foreground)] shadow-sm lg:hidden"
+                onClick={() => setMobileOpen(true)}
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted)]">
+                  sk-buy workspace
+                </p>
+                <h1 className="truncate text-lg font-semibold">AI API 中转平台聚合与社区</h1>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <ThemeToggle />
+
+                {authChecked && !user && (
+                  <div className="hidden items-center gap-2 sm:flex">
+                    <button onClick={openLogin} className="nav-auth-btn">登录</button>
+                    <button onClick={openRegister} className="nav-auth-btn nav-auth-btn-primary">注册</button>
+                  </div>
+                )}
+
+                {authChecked && user && (
+                  <div className="relative">
+                    <button className="nav-user-btn" onClick={() => setShowDropdown((v) => !v)}>
+                      <span className="nav-avatar">
+                        <User className="h-4 w-4" />
+                      </span>
+                      <span className="hidden max-w-[90px] truncate text-sm sm:inline">{user.username}</span>
+                      <ChevronDown className="h-4 w-4 text-[var(--muted)]" />
+                    </button>
+
+                    {showDropdown && (
+                      <>
+                        <button className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} aria-label="关闭菜单" />
+                        <div className="nav-dropdown">
+                          <div className="border-b border-[var(--border-color)] px-4 py-3">
+                            <p className="text-sm font-semibold">{user.username}</p>
+                            <p className="mt-1 text-xs text-[var(--muted)]">{user.email}</p>
+                          </div>
+                          {user.role === "admin" && (
+                            <Link href="/admin" className="nav-dropdown-item" onClick={() => setShowDropdown(false)}>
+                              <Settings className="h-4 w-4" />
+                              管理后台
+                            </Link>
+                          )}
+                          <button onClick={handleLogout} className="nav-dropdown-item">
+                            <LogOut className="h-4 w-4" />
+                            退出登录
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </header>
+        </div>
+      </div>
+
       <AuthModal
         isOpen={showAuth}
         defaultTab={authTab}

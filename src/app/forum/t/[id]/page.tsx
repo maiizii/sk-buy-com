@@ -148,7 +148,7 @@ export default function TopicDetailPage({
 
   if (loading) {
     return (
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <main className="w-full py-12">
         <div className="text-center text-muted font-mono animate-pulse">
           加载中...
         </div>
@@ -158,7 +158,7 @@ export default function TopicDetailPage({
 
   if (!topic) {
     return (
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <main className="w-full py-12">
         <div className="text-center text-muted">帖子不存在或已被删除</div>
         <div className="text-center mt-4">
           <Link href="/forum" className="btn-glass">
@@ -173,7 +173,7 @@ export default function TopicDetailPage({
     user && (user.id === topic.authorId || user.role === "admin");
 
   return (
-    <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <main className="w-full py-8 space-y-6">
       {/* Back nav */}
       <Link
         href={`/forum/c/${topic.categoryId}`}

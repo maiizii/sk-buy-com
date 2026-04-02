@@ -111,7 +111,7 @@ export default function TagPage({
   }, [decodedTag, page]);
 
   return (
-    <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <main className="w-full py-8 space-y-6">
       <Link
         href="/forum"
         className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground transition-colors"
