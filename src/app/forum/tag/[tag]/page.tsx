@@ -97,17 +97,23 @@ export default function TagPage({
   }, [decodedTag]);
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/forum/topics?tag=${decodedTag}&page=${page}&pageSize=20`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.success) {
+        if (!cancelled && data.success) {
           setTopics(data.data.topics);
           setTotalPages(data.data.totalPages);
         }
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [decodedTag, page]);
 
   return (
@@ -222,7 +228,10 @@ export default function TagPage({
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2">
           <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => {
+              setLoading(true);
+              setPage((p) => Math.max(1, p - 1));
+            }}
             disabled={page === 1}
             className="btn-glass p-2 disabled:opacity-30"
           >
@@ -232,7 +241,10 @@ export default function TagPage({
             {page} / {totalPages}
           </span>
           <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => {
+              setLoading(true);
+              setPage((p) => Math.min(totalPages, p + 1));
+            }}
             disabled={page === totalPages}
             className="btn-glass p-2 disabled:opacity-30"
           >

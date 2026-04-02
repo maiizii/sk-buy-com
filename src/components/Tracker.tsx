@@ -20,15 +20,9 @@ const Block = ({
   defaultBackgroundColor,
   hoverEffect,
 }: TrackerBlockProps) => {
-  const [open, setOpen] = React.useState(false);
   return (
-    <HoverCardPrimitives.Root
-      open={open}
-      onOpenChange={setOpen}
-      openDelay={0}
-      closeDelay={0}
-    >
-      <HoverCardPrimitives.Trigger onClick={() => setOpen(true)} asChild>
+    <HoverCardPrimitives.Root openDelay={60} closeDelay={40}>
+      <HoverCardPrimitives.Trigger asChild>
         <div className="size-full overflow-hidden px-[0.5px] transition first:rounded-l-[4px] first:pl-0 last:rounded-r-[4px] last:pr-0 sm:px-px">
           <div
             className={cx(
@@ -46,7 +40,8 @@ const Block = ({
           align="center"
           avoidCollisions
           className={cx(
-            "w-auto rounded-md px-2 py-1 text-sm shadow-md z-50",
+            "z-50 max-w-[220px] rounded-md px-2 py-1 text-sm shadow-md",
+            "pointer-events-none select-none",
             "text-white dark:text-gray-900",
             "bg-gray-900 dark:bg-gray-50"
           )}

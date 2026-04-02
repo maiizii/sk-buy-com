@@ -1,5 +1,8 @@
 import { deleteSession } from "@/lib/db";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
@@ -8,12 +11,16 @@ export async function POST() {
     if (token) {
       deleteSession(token);
     }
-    cookieStore.delete("sk-session");
-    return Response.json({ success: true });
+    const response = NextResponse.json(
+      { success: true },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+    response.cookies.delete("sk-session");
+    return response;
   } catch {
-    return Response.json(
+    return NextResponse.json(
       { success: false, error: "登出失败" },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }

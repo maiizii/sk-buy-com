@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -14,16 +15,19 @@ import {
   Settings,
   Shield,
   Sparkles,
-  Terminal,
   User,
   X,
+  Search,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { AuthModal } from "./AuthModal";
+import { getMessages } from "@/lib/i18n";
+import { getUserDisplayName } from "@/lib/auth-schema";
 
 interface UserInfo {
   id: number;
   username: string;
+  displayName: string;
   email: string;
   role: "user" | "admin";
 }
@@ -33,11 +37,14 @@ interface ForumCategory {
   name: string;
 }
 
+const t = getMessages();
+
 const PRIMARY_NAV = [
-  { label: "数据总览", href: "/", icon: LayoutDashboard, exact: true },
-  { label: "社区论坛", href: "/forum", icon: MessageCircle },
-  { label: "福利羊毛", href: "/forum/c/welfare", icon: Sparkles },
-  { label: "新手指南", href: "/forum/c/guide", icon: Shield },
+  { label: t.common.home, href: "/", icon: LayoutDashboard, exact: true },
+  { label: t.common.discover, href: "/discover", icon: Search },
+  { label: t.common.forum, href: "/forum", icon: MessageCircle },
+  { label: t.common.welfare, href: "/forum/c/welfare", icon: Sparkles },
+  { label: t.common.guide, href: "/forum/c/guide", icon: Shield },
 ];
 
 export function Navbar() {
@@ -52,7 +59,7 @@ export function Navbar() {
   const [categories, setCategories] = useState<ForumCategory[]>([]);
 
   const checkAuth = useCallback(() => {
-    fetch("/api/auth/me")
+    fetch("/api/auth/me", { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
       .then((data) => {
         if (data.success) setUser(data.data);
@@ -72,14 +79,6 @@ export function Navbar() {
       .catch(() => setCategories([]));
   }, [checkAuth]);
 
-  useEffect(() => {
-    setMobileOpen(false);
-    setShowDropdown(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (pathname.startsWith("/forum")) setForumOpen(true);
-  }, [pathname]);
 
   const isActive = (href: string, exact?: boolean) => {
     if (exact) return pathname === href;
@@ -105,12 +104,26 @@ export function Navbar() {
     setShowAuth(true);
   };
 
-  const handleAuthSuccess = (u: { id: number; username: string; email: string; role: string }) => {
+  const handleAuthSuccess = (u: {
+    id: number;
+    username: string;
+    displayName: string;
+    email: string;
+    role: string;
+  }) => {
     setUser(u as UserInfo);
+    setShowAuth(false);
+    setShowDropdown(false);
+    setMobileOpen(false);
+    setAuthChecked(true);
   };
 
   const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    });
     setUser(null);
     setShowDropdown(false);
   };
@@ -133,14 +146,14 @@ export function Navbar() {
           }`}
         >
           <div className="flex items-center justify-between px-2 py-2">
-            <Link href="/" className="flex items-center gap-3">
-              <span className="brand-logo">
-                <Terminal className="h-5 w-5" />
-              </span>
-              <span>
-                <span className="block text-sm font-semibold tracking-wide">sk-buy.com</span>
-                <span className="block text-xs text-[var(--muted)]">Materio style dashboard</span>
-              </span>
+            <Link href="/">
+              <Image
+                src="/logo200x54.png"
+                alt="sk-buy.com"
+                width={200}
+                height={54}
+                priority
+              />
             </Link>
             <button
               type="button"
@@ -217,9 +230,9 @@ export function Navbar() {
 
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted)]">
-                  sk-buy workspace
+                  {t.common.workspace}
                 </p>
-                <h1 className="truncate text-lg font-semibold">AI API 中转平台聚合与社区</h1>
+                <h1 className="truncate text-lg font-semibold">{t.common.siteTitle}</h1>
               </div>
 
               <div className="flex items-center gap-2">
@@ -227,8 +240,8 @@ export function Navbar() {
 
                 {authChecked && !user && (
                   <div className="hidden items-center gap-2 sm:flex">
-                    <button onClick={openLogin} className="nav-auth-btn">登录</button>
-                    <button onClick={openRegister} className="nav-auth-btn nav-auth-btn-primary">注册</button>
+                    <button onClick={openLogin} className="nav-auth-btn">{t.common.login}</button>
+                    <button onClick={openRegister} className="nav-auth-btn nav-auth-btn-primary">{t.common.register}</button>
                   </div>
                 )}
 
@@ -238,7 +251,9 @@ export function Navbar() {
                       <span className="nav-avatar">
                         <User className="h-4 w-4" />
                       </span>
-                      <span className="hidden max-w-[90px] truncate text-sm sm:inline">{user.username}</span>
+                      <span className="hidden max-w-[120px] truncate text-sm sm:inline">
+                        {getUserDisplayName(user)}
+                      </span>
                       <ChevronDown className="h-4 w-4 text-[var(--muted)]" />
                     </button>
 
@@ -247,18 +262,18 @@ export function Navbar() {
                         <button className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} aria-label="关闭菜单" />
                         <div className="nav-dropdown">
                           <div className="border-b border-[var(--border-color)] px-4 py-3">
-                            <p className="text-sm font-semibold">{user.username}</p>
+                            <p className="text-sm font-semibold">{getUserDisplayName(user)}</p>
                             <p className="mt-1 text-xs text-[var(--muted)]">{user.email}</p>
                           </div>
                           {user.role === "admin" && (
                             <Link href="/admin" className="nav-dropdown-item" onClick={() => setShowDropdown(false)}>
                               <Settings className="h-4 w-4" />
-                              管理后台
+                              {t.common.admin}
                             </Link>
                           )}
                           <button onClick={handleLogout} className="nav-dropdown-item">
                             <LogOut className="h-4 w-4" />
-                            退出登录
+                            {t.common.logout}
                           </button>
                         </div>
                       </>

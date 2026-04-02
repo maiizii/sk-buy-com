@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, X, LogIn, UserPlus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, X, LogIn, UserPlus, Mail } from "lucide-react";
 
 type AuthTab = "login" | "register";
 
@@ -9,21 +9,36 @@ interface AuthModalProps {
   isOpen: boolean;
   defaultTab?: AuthTab;
   onClose: () => void;
-  onSuccess: (user: { id: number; username: string; email: string; role: string }) => void;
+  onSuccess: (user: {
+    id: number;
+    username: string;
+    displayName: string;
+    email: string;
+    role: string;
+  }) => void;
 }
 
-export function AuthModal({ isOpen, defaultTab = "login", onClose, onSuccess }: AuthModalProps) {
+export function AuthModal({
+  isOpen,
+  defaultTab = "login",
+  onClose,
+  onSuccess,
+}: AuthModalProps) {
   const [tab, setTab] = useState<AuthTab>(defaultTab);
-  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    setTab(defaultTab);
+  }, [defaultTab]);
+
   if (!isOpen) return null;
 
   const reset = () => {
-    setUsername("");
+    setDisplayName("");
     setEmail("");
     setPassword("");
     setError("");
@@ -43,12 +58,13 @@ export function AuthModal({ isOpen, defaultTab = "login", onClose, onSuccess }: 
       const endpoint = tab === "login" ? "/api/auth/login" : "/api/auth/register";
       const body =
         tab === "login"
-          ? { username, password }
-          : { username, email, password };
+          ? { email, password }
+          : { email, password, displayName };
 
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(body),
       });
       const data = await res.json();
@@ -69,16 +85,10 @@ export function AuthModal({ isOpen, defaultTab = "login", onClose, onSuccess }: 
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Modal */}
       <div className="relative w-full max-w-md animate-fade-in-up">
         <div className="auth-modal-card">
-          {/* Close button */}
           <button
             onClick={onClose}
             className="absolute top-4 right-4 p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-[var(--border-color)] transition-colors"
@@ -86,7 +96,11 @@ export function AuthModal({ isOpen, defaultTab = "login", onClose, onSuccess }: 
             <X className="w-4 h-4" />
           </button>
 
-          {/* Tabs */}
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent-strong)]">
+            <Mail className="h-3.5 w-3.5" />
+            当前仅支持邮箱注册与登录
+          </div>
+
           <div className="flex mb-6 border-b border-[var(--border-color)]">
             <button
               onClick={() => switchTab("login")}
@@ -104,41 +118,39 @@ export function AuthModal({ isOpen, defaultTab = "login", onClose, onSuccess }: 
             </button>
           </div>
 
-          {/* Error */}
           {error && (
             <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono">
               {error}
             </div>
           )}
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="admin-label">用户名</label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="admin-input"
-                placeholder="请输入用户名"
-                required
-                autoFocus
-              />
-            </div>
-
             {tab === "register" && (
               <div>
-                <label className="admin-label">邮箱</label>
+                <label className="admin-label">显示名称</label>
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
                   className="admin-input"
-                  placeholder="请输入邮箱"
-                  required
+                  placeholder="可选，用于论坛与前台展示"
+                  autoFocus
                 />
               </div>
             )}
+
+            <div>
+              <label className="admin-label">邮箱</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="admin-input"
+                placeholder="请输入邮箱"
+                required
+                autoFocus={tab === "login"}
+              />
+            </div>
 
             <div>
               <label className="admin-label">密码</label>
@@ -160,32 +172,25 @@ export function AuthModal({ isOpen, defaultTab = "login", onClose, onSuccess }: 
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : tab === "login" ? (
-                "登 录"
+                "邮 箱 登 录"
               ) : (
-                "注 册"
+                "邮 箱 注 册"
               )}
             </button>
           </form>
 
-          {/* Footer hint */}
           <p className="mt-4 text-center text-xs text-muted">
             {tab === "login" ? (
               <>
                 还没有账号？{" "}
-                <button
-                  onClick={() => switchTab("register")}
-                  className="text-[var(--accent)] hover:underline"
-                >
+                <button onClick={() => switchTab("register")} className="text-[var(--accent)] hover:underline">
                   立即注册
                 </button>
               </>
             ) : (
               <>
                 已有账号？{" "}
-                <button
-                  onClick={() => switchTab("login")}
-                  className="text-[var(--accent)] hover:underline"
-                >
+                <button onClick={() => switchTab("login")} className="text-[var(--accent)] hover:underline">
                   去登录
                 </button>
               </>

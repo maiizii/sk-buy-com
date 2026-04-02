@@ -2,10 +2,12 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+import {
+  modelRegistrySeed,
+  platformAttributeGroupsSeed,
+  platformAttributeOptionsSeed,
+} from "./platform-config";
 
-// ============================================================
-// Database Setup
-// ============================================================
 const DB_PATH = path.join(process.cwd(), "data", "sk-buy.db");
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
@@ -13,18 +15,29 @@ const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-// ============================================================
-// Schema Creation
-// ============================================================
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
+    displayName TEXT DEFAULT '',
     passwordHash TEXT NOT NULL,
     role TEXT DEFAULT 'user' CHECK(role IN ('user', 'admin')),
     avatar TEXT DEFAULT '',
-    createdAt TEXT DEFAULT (datetime('now'))
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS user_auth_providers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    providerUserId TEXT NOT NULL,
+    metaJson TEXT DEFAULT '{}',
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now')),
+    UNIQUE(provider, providerUserId),
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS sessions (
@@ -51,8 +64,76 @@ db.exec(`
     joinDate TEXT NOT NULL,
     description TEXT DEFAULT '',
     sortOrder INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',
+    metaJson TEXT DEFAULT '{}',
     createdAt TEXT DEFAULT (datetime('now')),
     updatedAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS platform_attribute_groups (
+    id TEXT PRIMARY KEY,
+    key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    inputType TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    isFilterable INTEGER DEFAULT 1,
+    isComparable INTEGER DEFAULT 1,
+    isVisibleByDefault INTEGER DEFAULT 0,
+    sortOrder INTEGER DEFAULT 0,
+    metaJson TEXT DEFAULT '{}',
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS platform_attribute_options (
+    id TEXT PRIMARY KEY,
+    groupKey TEXT NOT NULL,
+    value TEXT NOT NULL,
+    label TEXT NOT NULL,
+    color TEXT DEFAULT '',
+    enabled INTEGER DEFAULT 1,
+    sortOrder INTEGER DEFAULT 0,
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now')),
+    UNIQUE(groupKey, value)
+  );
+
+  CREATE TABLE IF NOT EXISTS platform_attribute_values (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platformId TEXT NOT NULL,
+    groupKey TEXT NOT NULL,
+    optionValue TEXT DEFAULT '',
+    valueText TEXT DEFAULT '',
+    valueNumber REAL,
+    valueBoolean INTEGER,
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS model_registry (
+    id TEXT PRIMARY KEY,
+    key TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    vendor TEXT DEFAULT '',
+    featured INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
+    metaJson TEXT DEFAULT '{}',
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS platform_models (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platformId TEXT NOT NULL,
+    modelKey TEXT NOT NULL,
+    isFeatured INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
+    remark TEXT DEFAULT '',
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now')),
+    UNIQUE(platformId, modelKey),
+    FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS connectivity_logs (
@@ -62,6 +143,37 @@ db.exec(`
     latency INTEGER DEFAULT 0,
     errorMessage TEXT DEFAULT '',
     checkedAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS probe_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platformId TEXT NOT NULL,
+    probeType TEXT NOT NULL,
+    targetType TEXT DEFAULT 'platform',
+    targetKey TEXT DEFAULT '',
+    enabled INTEGER DEFAULT 1,
+    intervalSeconds INTEGER DEFAULT 300,
+    timeoutMs INTEGER DEFAULT 10000,
+    retryCount INTEGER DEFAULT 1,
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS probe_aggregates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platformId TEXT NOT NULL,
+    targetType TEXT DEFAULT 'platform',
+    targetKey TEXT DEFAULT '',
+    timeWindow TEXT NOT NULL,
+    uptime REAL DEFAULT 0,
+    avgLatency INTEGER DEFAULT 0,
+    successCount INTEGER DEFAULT 0,
+    failureCount INTEGER DEFAULT 0,
+    lastCheckedAt TEXT,
+    updatedAt TEXT DEFAULT (datetime('now')),
+    UNIQUE(platformId, targetType, targetKey, timeWindow),
     FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
   );
 
@@ -119,20 +231,34 @@ db.exec(`
   );
 `);
 
-// Add columns to existing platforms table (safe if already exists)
-try { db.exec(`ALTER TABLE platforms ADD COLUMN baseUrl TEXT DEFAULT ''`); } catch { /* column already exists */ }
-try { db.exec(`ALTER TABLE platforms ADD COLUMN monitorEnabled INTEGER DEFAULT 0`); } catch { /* column already exists */ }
+function hasColumn(tableName: string, columnName: string) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
+}
 
-// Create indexes
+if (!hasColumn("users", "displayName")) {
+  db.exec(`ALTER TABLE users ADD COLUMN displayName TEXT DEFAULT ''`);
+}
+if (!hasColumn("users", "updatedAt")) {
+  db.exec(`ALTER TABLE users ADD COLUMN updatedAt TEXT`);
+  db.exec(`UPDATE users SET updatedAt = COALESCE(createdAt, datetime('now')) WHERE updatedAt IS NULL OR updatedAt = ''`);
+}
+try { db.exec(`ALTER TABLE platforms ADD COLUMN baseUrl TEXT DEFAULT ''`); } catch {}
+if (!hasColumn("platform_attribute_options", "color")) {
+  db.exec(`ALTER TABLE platform_attribute_options ADD COLUMN color TEXT DEFAULT ''`);
+}
+try { db.exec(`ALTER TABLE platforms ADD COLUMN monitorEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE platforms ADD COLUMN status TEXT DEFAULT 'active'`); } catch {}
+try { db.exec(`ALTER TABLE platforms ADD COLUMN metaJson TEXT DEFAULT '{}'`); } catch {}
+try { db.exec(`ALTER TABLE platform_attribute_groups ADD COLUMN metaJson TEXT DEFAULT '{}'`); } catch {}
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_connectivity_logs_platform_time ON connectivity_logs(platformId, checkedAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_topics_category ON forum_topics(categoryId, createdAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_replies_topic ON forum_replies(topicId, createdAt ASC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_ratings_platform ON platform_ratings(platformId)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_attribute_values_platform ON platform_attribute_values(platformId, groupKey)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_models_platform ON platform_models(platformId, modelKey)`);
 
-
-// ============================================================
-// Password Hashing (using Node.js crypto.scrypt — zero deps)
-// ============================================================
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
@@ -145,92 +271,105 @@ export function verifyPassword(password: string, stored: string): boolean {
   return hash === verify;
 }
 
-// ============================================================
-// User Operations
-// ============================================================
 export interface User {
   id: number;
   username: string;
   email: string;
+  displayName: string;
   role: "user" | "admin";
   avatar: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 interface UserRow extends User {
   passwordHash: string;
 }
 
-export function createUser(
-  username: string,
-  email: string,
-  password: string,
-  role: "user" | "admin" = "user"
-): User {
-  const passwordHash = hashPassword(password);
-  const stmt = db.prepare(
-    `INSERT INTO users (username, email, passwordHash, role) VALUES (?, ?, ?, ?)`
-  );
-  const result = stmt.run(username, email, passwordHash, role);
-  return getUserById(result.lastInsertRowid as number)!;
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function generateUsernameFromEmail(email: string) {
+  const localPart = normalizeEmail(email).split("@")[0].replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") || "user";
+  let username = localPart.slice(0, 24);
+  let counter = 1;
+  while (getUserByUsername(username)) {
+    username = `${localPart.slice(0, 20)}-${counter++}`;
+  }
+  return username;
+}
+
+export function createUser(data: {
+  email: string;
+  password: string;
+  role?: "user" | "admin";
+  displayName?: string;
+  username?: string;
+}): User {
+  const passwordHash = hashPassword(data.password);
+  const email = normalizeEmail(data.email);
+  const username = data.username?.trim() || generateUsernameFromEmail(email);
+  const displayName = data.displayName?.trim() || username;
+  const role = data.role || "user";
+  const result = db
+    .prepare(
+      `INSERT INTO users (username, email, displayName, passwordHash, role, updatedAt) VALUES (?, ?, ?, ?, ?, datetime('now'))`
+    )
+    .run(username, email, displayName, passwordHash, role);
+
+  const user = getUserById(result.lastInsertRowid as number)!;
+  db.prepare(
+    `INSERT OR IGNORE INTO user_auth_providers (userId, provider, providerUserId, metaJson) VALUES (?, 'email', ?, '{}')`
+  ).run(user.id, user.email);
+  return user;
 }
 
 export function getUserById(id: number): User | null {
   const row = db
-    .prepare(
-      `SELECT id, username, email, role, avatar, createdAt FROM users WHERE id = ?`
-    )
+    .prepare(`SELECT id, username, email, displayName, role, avatar, createdAt, updatedAt FROM users WHERE id = ?`)
     .get(id) as User | undefined;
   return row || null;
 }
 
 export function getUserByUsername(username: string): UserRow | null {
-  const row = db
-    .prepare(`SELECT * FROM users WHERE username = ?`)
-    .get(username) as UserRow | undefined;
+  const row = db.prepare(`SELECT * FROM users WHERE username = ?`).get(username) as UserRow | undefined;
   return row || null;
 }
 
 export function getUserByEmail(email: string): UserRow | null {
-  const row = db
-    .prepare(`SELECT * FROM users WHERE email = ?`)
-    .get(email) as UserRow | undefined;
+  const row = db.prepare(`SELECT * FROM users WHERE email = ?`).get(normalizeEmail(email)) as UserRow | undefined;
   return row || null;
 }
 
 export function getAllUsers(): User[] {
   return db
-    .prepare(
-      `SELECT id, username, email, role, avatar, createdAt FROM users ORDER BY createdAt DESC`
-    )
+    .prepare(`SELECT id, username, email, displayName, role, avatar, createdAt, updatedAt FROM users ORDER BY createdAt DESC`)
     .all() as User[];
 }
 
 export function updateUserRole(id: number, role: "user" | "admin"): void {
-  db.prepare(`UPDATE users SET role = ? WHERE id = ?`).run(role, id);
+  db.prepare(`UPDATE users SET role = ?, updatedAt = datetime('now') WHERE id = ?`).run(role, id);
 }
 
-// ============================================================
-// Session Operations
-// ============================================================
 export function createSession(userId: number): string {
   const token = crypto.randomUUID();
-  const expiresAt = new Date(
-    Date.now() + 7 * 24 * 60 * 60 * 1000
-  ).toISOString();
-  db.prepare(
-    `INSERT INTO sessions (userId, token, expiresAt) VALUES (?, ?, ?)`
-  ).run(userId, token, expiresAt);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
+  db.prepare(`INSERT INTO sessions (userId, token, expiresAt) VALUES (?, ?, ?)`).run(userId, token, expiresAt);
   return token;
 }
 
 export function getUserBySessionToken(token: string): User | null {
   const row = db
     .prepare(
-      `SELECT u.id, u.username, u.email, u.role, u.avatar, u.createdAt
+      `SELECT u.id, u.username, u.email, u.displayName, u.role, u.avatar, u.createdAt,
+              COALESCE(u.updatedAt, u.createdAt) as updatedAt
        FROM sessions s
        JOIN users u ON s.userId = u.id
-       WHERE s.token = ? AND s.expiresAt > datetime('now')`
+       WHERE s.token = ? AND datetime(s.expiresAt) > datetime('now')`
     )
     .get(token) as User | undefined;
   return row || null;
@@ -241,12 +380,9 @@ export function deleteSession(token: string): void {
 }
 
 export function cleanExpiredSessions(): void {
-  db.prepare(`DELETE FROM sessions WHERE expiresAt <= datetime('now')`).run();
+  db.prepare(`DELETE FROM sessions WHERE datetime(expiresAt) <= datetime('now')`).run();
 }
 
-// ============================================================
-// Platform Operations
-// ============================================================
 export interface Platform {
   id: string;
   name: string;
@@ -263,6 +399,8 @@ export interface Platform {
   joinDate: string;
   description: string;
   sortOrder: number;
+  status: string;
+  metaJson: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -283,6 +421,8 @@ interface PlatformRow {
   joinDate: string;
   description: string;
   sortOrder: number;
+  status: string;
+  metaJson: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -297,26 +437,20 @@ function rowToPlatform(row: PlatformRow): Platform {
 }
 
 export function getAllPlatforms(): Platform[] {
-  const rows = db
-    .prepare(`SELECT * FROM platforms ORDER BY sortOrder ASC, createdAt DESC`)
-    .all() as PlatformRow[];
+  const rows = db.prepare(`SELECT * FROM platforms ORDER BY sortOrder ASC, createdAt DESC`).all() as PlatformRow[];
   return rows.map(rowToPlatform);
 }
 
 export function getPlatformById(id: string): Platform | null {
-  const row = db
-    .prepare(`SELECT * FROM platforms WHERE id = ?`)
-    .get(id) as PlatformRow | undefined;
+  const row = db.prepare(`SELECT * FROM platforms WHERE id = ?`).get(id) as PlatformRow | undefined;
   return row ? rowToPlatform(row) : null;
 }
 
-export function createPlatform(
-  data: Omit<Platform, "createdAt" | "updatedAt">
-): Platform {
+export function createPlatform(data: Omit<Platform, "createdAt" | "updatedAt" | "status" | "metaJson"> & { status?: string; metaJson?: string }): Platform {
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO platforms (id, name, url, baseUrl, monitorEnabled, tag, tagLabel, billingRate, billingColor, models, uptime, latency, joinDate, description, sortOrder, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO platforms (id, name, url, baseUrl, monitorEnabled, tag, tagLabel, billingRate, billingColor, models, uptime, latency, joinDate, description, sortOrder, status, metaJson, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     data.id,
     data.name,
@@ -333,16 +467,15 @@ export function createPlatform(
     data.joinDate,
     data.description || "",
     data.sortOrder || 0,
+    data.status || "active",
+    data.metaJson || "{}",
     now,
     now
   );
   return getPlatformById(data.id)!;
 }
 
-export function updatePlatform(
-  id: string,
-  data: Partial<Omit<Platform, "id" | "createdAt" | "updatedAt">>
-): Platform | null {
+export function updatePlatform(id: string, data: Partial<Omit<Platform, "id" | "createdAt" | "updatedAt">>): Platform | null {
   const existing = getPlatformById(id);
   if (!existing) return null;
 
@@ -352,7 +485,7 @@ export function updatePlatform(
   db.prepare(
     `UPDATE platforms SET
       name = ?, url = ?, baseUrl = ?, monitorEnabled = ?, tag = ?, tagLabel = ?, billingRate = ?, billingColor = ?,
-      models = ?, uptime = ?, latency = ?, joinDate = ?, description = ?, sortOrder = ?, updatedAt = ?
+      models = ?, uptime = ?, latency = ?, joinDate = ?, description = ?, sortOrder = ?, status = ?, metaJson = ?, updatedAt = ?
      WHERE id = ?`
   ).run(
     updated.name,
@@ -369,6 +502,8 @@ export function updatePlatform(
     updated.joinDate,
     updated.description,
     updated.sortOrder,
+    updated.status,
+    updated.metaJson,
     now,
     id
   );
@@ -380,9 +515,334 @@ export function deletePlatform(id: string): boolean {
   return result.changes > 0;
 }
 
-// ============================================================
-// Connectivity Log Operations
-// ============================================================
+export interface PlatformAttributeGroupRecord {
+  id: string;
+  key: string;
+  label: string;
+  inputType: string;
+  enabled: boolean;
+  isFilterable: boolean;
+  isComparable: boolean;
+  isVisibleByDefault: boolean;
+  sortOrder: number;
+  boundField?: "none" | "site_tag" | "featured_models";
+}
+
+export interface PlatformAttributeOptionRecord {
+  id: string;
+  groupKey: string;
+  value: string;
+  label: string;
+  color: string;
+  enabled: boolean;
+  sortOrder: number;
+}
+
+export interface ModelRegistryRecord {
+  id: string;
+  key: string;
+  name: string;
+  vendor: string;
+  featured: boolean;
+  enabled: boolean;
+}
+
+export interface PlatformAttributeValueRecord {
+  id: number;
+  platformId: string;
+  groupKey: string;
+  optionValue: string;
+  valueText: string;
+  valueNumber: number | null;
+  valueBoolean: boolean | null;
+}
+
+function slugifyKey(input: string) {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || `group_${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function rowToPlatformAttributeGroup(row: {
+  id: string;
+  key: string;
+  label: string;
+  inputType: string;
+  enabled: number;
+  isFilterable: number;
+  isComparable: number;
+  isVisibleByDefault: number;
+  sortOrder: number;
+  metaJson?: string;
+}): PlatformAttributeGroupRecord {
+  const meta = JSON.parse(row.metaJson || "{}") as { boundField?: "none" | "site_tag" | "featured_models" };
+  return {
+    id: row.id,
+    key: row.key,
+    label: row.label,
+    inputType: row.inputType,
+    enabled: row.enabled === 1,
+    isFilterable: row.isFilterable === 1,
+    isComparable: row.isComparable === 1,
+    isVisibleByDefault: row.isVisibleByDefault === 1,
+    sortOrder: row.sortOrder,
+    boundField: meta.boundField || "none",
+  };
+}
+
+function rowToPlatformAttributeOption(row: {
+  id: string;
+  groupKey: string;
+  value: string;
+  label: string;
+  color: string;
+  enabled: number;
+  sortOrder: number;
+}): PlatformAttributeOptionRecord {
+  return {
+    ...row,
+    enabled: row.enabled === 1,
+  };
+}
+
+function rowToPlatformAttributeValue(row: {
+  id: number;
+  platformId: string;
+  groupKey: string;
+  optionValue: string;
+  valueText: string;
+  valueNumber: number | null;
+  valueBoolean: number | null;
+}): PlatformAttributeValueRecord {
+  return {
+    ...row,
+    valueBoolean: row.valueBoolean === null ? null : row.valueBoolean === 1,
+  };
+}
+
+export function getPlatformAttributeGroups(): PlatformAttributeGroupRecord[] {
+  return db
+    .prepare(`SELECT * FROM platform_attribute_groups ORDER BY sortOrder ASC, createdAt ASC`)
+    .all()
+    .map((row) => rowToPlatformAttributeGroup(row as {
+      id: string;
+      key: string;
+      label: string;
+      inputType: string;
+      enabled: number;
+      isFilterable: number;
+      isComparable: number;
+      isVisibleByDefault: number;
+      sortOrder: number;
+      metaJson?: string;
+    }));
+}
+
+export function createPlatformAttributeGroup(data: {
+  label: string;
+  key?: string;
+  inputType: string;
+  enabled?: boolean;
+  isFilterable?: boolean;
+  isComparable?: boolean;
+  isVisibleByDefault?: boolean;
+  sortOrder?: number;
+  boundField?: "none" | "site_tag" | "featured_models";
+}): PlatformAttributeGroupRecord {
+  const id = `group_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const key = slugifyKey(data.key || data.label);
+  db.prepare(
+    `INSERT INTO platform_attribute_groups (id, key, label, inputType, enabled, isFilterable, isComparable, isVisibleByDefault, sortOrder, metaJson)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    key,
+    data.label.trim(),
+    data.inputType,
+    data.enabled === false ? 0 : 1,
+    data.isFilterable === false ? 0 : 1,
+    data.isComparable === false ? 0 : 1,
+    data.isVisibleByDefault ? 1 : 0,
+    data.sortOrder || 0,
+    JSON.stringify({ boundField: data.boundField || "none" })
+  );
+  return getPlatformAttributeGroups().find((group) => group.id === id)!;
+}
+
+export function updatePlatformAttributeGroup(
+  id: string,
+  data: Partial<{
+    label: string;
+    key: string;
+    inputType: string;
+    enabled: boolean;
+    isFilterable: boolean;
+    isComparable: boolean;
+    isVisibleByDefault: boolean;
+    sortOrder: number;
+    boundField: "none" | "site_tag" | "featured_models";
+  }>
+): PlatformAttributeGroupRecord | null {
+  const existing = getPlatformAttributeGroups().find((group) => group.id === id);
+  if (!existing) return null;
+  const updated = {
+    ...existing,
+    ...data,
+    key: data.key ? slugifyKey(data.key) : existing.key,
+    label: data.label?.trim() || existing.label,
+  };
+  db.prepare(
+    `UPDATE platform_attribute_groups SET key = ?, label = ?, inputType = ?, enabled = ?, isFilterable = ?, isComparable = ?, isVisibleByDefault = ?, sortOrder = ?, metaJson = ?, updatedAt = datetime('now') WHERE id = ?`
+  ).run(
+    updated.key,
+    updated.label,
+    updated.inputType,
+    updated.enabled ? 1 : 0,
+    updated.isFilterable ? 1 : 0,
+    updated.isComparable ? 1 : 0,
+    updated.isVisibleByDefault ? 1 : 0,
+    updated.sortOrder,
+    JSON.stringify({ boundField: updated.boundField || "none" }),
+    id
+  );
+  return getPlatformAttributeGroups().find((group) => group.id === id) || null;
+}
+
+export function deletePlatformAttributeGroup(id: string): boolean {
+  const existing = getPlatformAttributeGroups().find((group) => group.id === id);
+  if (!existing) return false;
+  db.prepare(`DELETE FROM platform_attribute_values WHERE groupKey = ?`).run(existing.key);
+  db.prepare(`DELETE FROM platform_attribute_options WHERE groupKey = ?`).run(existing.key);
+  const result = db.prepare(`DELETE FROM platform_attribute_groups WHERE id = ?`).run(id);
+  return result.changes > 0;
+}
+
+export function getPlatformAttributeOptions(): PlatformAttributeOptionRecord[] {
+  return db
+    .prepare(`SELECT * FROM platform_attribute_options ORDER BY groupKey ASC, sortOrder ASC`)
+    .all()
+    .map((row) => rowToPlatformAttributeOption(row as {
+      id: string;
+      groupKey: string;
+      value: string;
+      label: string;
+      color: string;
+      enabled: number;
+      sortOrder: number;
+    }));
+}
+
+export function createPlatformAttributeOption(data: {
+  groupKey: string;
+  label: string;
+  value?: string;
+  color?: string;
+  enabled?: boolean;
+  sortOrder?: number;
+}): PlatformAttributeOptionRecord {
+  const id = `option_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const value = slugifyKey(data.value || data.label);
+  db.prepare(
+    `INSERT INTO platform_attribute_options (id, groupKey, value, label, color, enabled, sortOrder)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, data.groupKey, value, data.label.trim(), (data.color || "").trim(), data.enabled === false ? 0 : 1, data.sortOrder || 0);
+  return getPlatformAttributeOptions().find((option) => option.id === id)!;
+}
+
+export function updatePlatformAttributeOption(
+  id: string,
+  data: Partial<{
+    groupKey: string;
+    label: string;
+    value: string;
+    color: string;
+    enabled: boolean;
+    sortOrder: number;
+  }>
+): PlatformAttributeOptionRecord | null {
+  const existing = getPlatformAttributeOptions().find((option) => option.id === id);
+  if (!existing) return null;
+  const updated = {
+    ...existing,
+    ...data,
+    value: data.value ? slugifyKey(data.value) : existing.value,
+    label: data.label?.trim() || existing.label,
+  };
+  db.prepare(
+    `UPDATE platform_attribute_options SET groupKey = ?, value = ?, label = ?, color = ?, enabled = ?, sortOrder = ?, updatedAt = datetime('now') WHERE id = ?`
+  ).run(updated.groupKey, updated.value, updated.label, (updated.color || "").trim(), updated.enabled ? 1 : 0, updated.sortOrder, id);
+  return getPlatformAttributeOptions().find((option) => option.id === id) || null;
+}
+
+export function deletePlatformAttributeOption(id: string): boolean {
+  const existing = getPlatformAttributeOptions().find((option) => option.id === id);
+  if (!existing) return false;
+  db.prepare(`DELETE FROM platform_attribute_values WHERE groupKey = ? AND optionValue = ?`).run(existing.groupKey, existing.value);
+  const result = db.prepare(`DELETE FROM platform_attribute_options WHERE id = ?`).run(id);
+  return result.changes > 0;
+}
+
+export function getPlatformAttributeValues(platformId?: string): PlatformAttributeValueRecord[] {
+  const rows = platformId
+    ? db.prepare(`SELECT * FROM platform_attribute_values WHERE platformId = ? ORDER BY groupKey ASC, id ASC`).all(platformId)
+    : db.prepare(`SELECT * FROM platform_attribute_values ORDER BY platformId ASC, groupKey ASC, id ASC`).all();
+
+  return rows.map((row) =>
+    rowToPlatformAttributeValue(row as {
+      id: number;
+      platformId: string;
+      groupKey: string;
+      optionValue: string;
+      valueText: string;
+      valueNumber: number | null;
+      valueBoolean: number | null;
+    })
+  );
+}
+
+export function replacePlatformAttributeValues(
+  platformId: string,
+  values: Array<{
+    groupKey: string;
+    optionValue?: string;
+    valueText?: string;
+    valueNumber?: number | null;
+    valueBoolean?: boolean | null;
+  }>
+): PlatformAttributeValueRecord[] {
+  db.prepare(`DELETE FROM platform_attribute_values WHERE platformId = ?`).run(platformId);
+  const stmt = db.prepare(
+    `INSERT INTO platform_attribute_values (platformId, groupKey, optionValue, valueText, valueNumber, valueBoolean, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+  );
+
+  for (const item of values) {
+    stmt.run(
+      platformId,
+      item.groupKey,
+      item.optionValue || "",
+      item.valueText || "",
+      item.valueNumber ?? null,
+      item.valueBoolean === null || item.valueBoolean === undefined ? null : item.valueBoolean ? 1 : 0
+    );
+  }
+
+  return getPlatformAttributeValues(platformId);
+}
+
+export function getModelRegistry(): ModelRegistryRecord[] {
+  return db
+    .prepare(`SELECT * FROM model_registry WHERE enabled = 1 ORDER BY featured DESC, name ASC`)
+    .all()
+    .map((row) => ({
+      ...(row as Omit<ModelRegistryRecord, "featured" | "enabled"> & { featured: number; enabled: number }),
+      featured: (row as { featured: number }).featured === 1,
+      enabled: (row as { enabled: number }).enabled === 1,
+    }));
+}
+
 export interface ConnectivityLog {
   id: number;
   platformId: string;
@@ -401,40 +861,21 @@ interface ConnectivityLogRow {
   checkedAt: string;
 }
 
-export function saveConnectivityLog(
-  platformId: string,
-  success: boolean,
-  latency: number,
-  errorMessage: string = ""
-): void {
+export function saveConnectivityLog(platformId: string, success: boolean, latency: number, errorMessage: string = ""): void {
   db.prepare(
     `INSERT INTO connectivity_logs (platformId, success, latency, errorMessage, checkedAt)
      VALUES (?, ?, ?, ?, datetime('now'))`
   ).run(platformId, success ? 1 : 0, latency, errorMessage);
 }
 
-export function getLatestConnectivityLogs(
-  platformId: string,
-  limit: number = 60
-): ConnectivityLog[] {
+export function getLatestConnectivityLogs(platformId: string, limit: number = 60): ConnectivityLog[] {
   const rows = db
-    .prepare(
-      `SELECT * FROM connectivity_logs WHERE platformId = ? ORDER BY checkedAt DESC LIMIT ?`
-    )
+    .prepare(`SELECT * FROM connectivity_logs WHERE platformId = ? ORDER BY checkedAt DESC LIMIT ?`)
     .all(platformId, limit) as ConnectivityLogRow[];
-  return rows.map((r) => ({
-    ...r,
-    success: r.success === 1,
-  }));
+  return rows.map((r) => ({ ...r, success: r.success === 1 }));
 }
 
-/**
- * Get hourly summarized connectivity data for the last 24 hours.
- * Returns one entry per hour: the latest check in each hour window.
- */
-export function getHourlyConnectivityLogs(
-  platformId: string
-): ConnectivityLog[] {
+export function getHourlyConnectivityLogs(platformId: string): ConnectivityLog[] {
   const rows = db
     .prepare(
       `WITH hourly AS (
@@ -449,10 +890,7 @@ export function getHourlyConnectivityLogs(
       ORDER BY checkedAt ASC`
     )
     .all(platformId) as ConnectivityLogRow[];
-  return rows.map((r) => ({
-    ...r,
-    success: r.success === 1,
-  }));
+  return rows.map((r) => ({ ...r, success: r.success === 1 }));
 }
 
 export interface ConnectivitySummary {
@@ -462,9 +900,7 @@ export interface ConnectivitySummary {
   totalChecks: number;
 }
 
-export function getConnectivitySummary(
-  platformId: string
-): ConnectivitySummary {
+export function getConnectivitySummary(platformId: string): ConnectivitySummary {
   const row = db
     .prepare(
       `SELECT
@@ -484,41 +920,70 @@ export function getConnectivitySummary(
 
   return {
     totalChecks: row.totalChecks,
-    uptime:
-      row.totalChecks > 0
-        ? Math.round((row.successCount / row.totalChecks) * 1000) / 10
-        : 0,
+    uptime: row.totalChecks > 0 ? Math.round((row.successCount / row.totalChecks) * 1000) / 10 : 0,
     avgLatency: Math.round(row.avgLatency || 0),
     lastCheck: row.lastCheck,
   };
 }
 
 export function getMonitorEnabledPlatforms(): Platform[] {
-  const rows = db
-    .prepare(`SELECT * FROM platforms WHERE monitorEnabled = 1 ORDER BY sortOrder ASC`)
-    .all() as PlatformRow[];
+  const rows = db.prepare(`SELECT * FROM platforms WHERE monitorEnabled = 1 ORDER BY sortOrder ASC`).all() as PlatformRow[];
   return rows.map(rowToPlatform);
 }
 
-/**
- * Clean up connectivity logs older than 3 days.
- */
 export function cleanOldConnectivityLogs(): number {
-  const result = db
-    .prepare(`DELETE FROM connectivity_logs WHERE checkedAt < datetime('now', '-3 days')`)
-    .run();
+  const result = db.prepare(`DELETE FROM connectivity_logs WHERE checkedAt < datetime('now', '-3 days')`).run();
   return result.changes;
 }
 
-// ============================================================
-// Seed Data — runs only if tables are empty
-// ============================================================
-function seedData() {
-  const platformCount = (
-    db.prepare(`SELECT COUNT(*) as count FROM platforms`).get() as {
-      count: number;
+function seedPlatformConfig() {
+  const groupCount = (db.prepare(`SELECT COUNT(*) as count FROM platform_attribute_groups`).get() as { count: number }).count;
+  if (groupCount === 0) {
+    const stmt = db.prepare(
+      `INSERT INTO platform_attribute_groups (id, key, label, inputType, enabled, isFilterable, isComparable, isVisibleByDefault, sortOrder, metaJson)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const group of platformAttributeGroupsSeed) {
+      stmt.run(
+        group.id,
+        group.key,
+        group.label,
+        group.inputType,
+        group.enabled ? 1 : 0,
+        group.isFilterable ? 1 : 0,
+        group.isComparable ? 1 : 0,
+        group.isVisibleByDefault ? 1 : 0,
+        group.sortOrder,
+        JSON.stringify({ boundField: group.boundField || "none" })
+      );
     }
-  ).count;
+  }
+
+  const optionCount = (db.prepare(`SELECT COUNT(*) as count FROM platform_attribute_options`).get() as { count: number }).count;
+  if (optionCount === 0) {
+    const stmt = db.prepare(
+      `INSERT INTO platform_attribute_options (id, groupKey, value, label, color, enabled, sortOrder)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const option of platformAttributeOptionsSeed) {
+      stmt.run(option.id, option.groupKey, option.value, option.label, option.color || "", option.enabled ? 1 : 0, option.sortOrder);
+    }
+  }
+
+  const modelCount = (db.prepare(`SELECT COUNT(*) as count FROM model_registry`).get() as { count: number }).count;
+  if (modelCount === 0) {
+    const stmt = db.prepare(
+      `INSERT INTO model_registry (id, key, name, vendor, featured, enabled, metaJson)
+       VALUES (?, ?, ?, ?, ?, 1, '{}')`
+    );
+    for (const model of modelRegistrySeed) {
+      stmt.run(model.id, model.key, model.name, model.vendor, model.featured ? 1 : 0);
+    }
+  }
+}
+
+function seedData() {
+  const platformCount = (db.prepare(`SELECT COUNT(*) as count FROM platforms`).get() as { count: number }).count;
 
   if (platformCount === 0) {
     const seedPlatforms: Omit<Platform, "createdAt" | "updatedAt">[] = [
@@ -538,6 +1003,8 @@ function seedData() {
         joinDate: "2024-03-15",
         description: "高品质 API 中转服务，稳定性极佳",
         sortOrder: 1,
+        status: "active",
+        metaJson: "{}",
       },
       {
         id: "freegpt-hub",
@@ -555,6 +1022,8 @@ function seedData() {
         joinDate: "2024-08-22",
         description: "免费公益站，不保证稳定性",
         sortOrder: 2,
+        status: "active",
+        metaJson: "{}",
       },
       {
         id: "siliconflow",
@@ -572,6 +1041,8 @@ function seedData() {
         joinDate: "2024-06-10",
         description: "国产模型聚合，性价比优秀",
         sortOrder: 3,
+        status: "active",
+        metaJson: "{}",
       },
       {
         id: "gpt-proxy-xyz",
@@ -589,36 +1060,49 @@ function seedData() {
         joinDate: "2024-01-05",
         description: "服务已不可用，疑似跑路",
         sortOrder: 4,
+        status: "archived",
+        metaJson: "{}",
       },
     ];
 
-    for (const p of seedPlatforms) {
-      createPlatform(p);
-    }
+    for (const p of seedPlatforms) createPlatform(p);
+
+    replacePlatformAttributeValues("openrouter-pro", [
+      { groupKey: "route_type", optionValue: "global_route" },
+      { groupKey: "payment_methods", optionValue: "crypto" },
+    ]);
+    replacePlatformAttributeValues("freegpt-hub", [
+      { groupKey: "route_type", optionValue: "global_route" },
+    ]);
+    replacePlatformAttributeValues("siliconflow", [
+      { groupKey: "route_type", optionValue: "cn_direct" },
+      { groupKey: "payment_methods", optionValue: "alipay" },
+      { groupKey: "payment_methods", optionValue: "wechat_pay" },
+    ]);
+    replacePlatformAttributeValues("gpt-proxy-xyz", [
+      { groupKey: "route_type", optionValue: "global_route" },
+      { groupKey: "payment_methods", optionValue: "crypto" },
+    ]);
+
     console.log("[DB] Seeded 4 default platforms");
   }
 
-  // Seed default admin user
-  const userCount = (
-    db.prepare(`SELECT COUNT(*) as count FROM users`).get() as {
-      count: number;
-    }
-  ).count;
-
+  const userCount = (db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number }).count;
   if (userCount === 0) {
-    const adminUsername = process.env.ADMIN_USERNAME || "admin";
+    const adminEmail = process.env.ADMIN_EMAIL || "admin@sk-buy.com";
     const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
-    createUser(adminUsername, `${adminUsername}@sk-buy.com`, adminPassword, "admin");
-    console.log(`[DB] Created default admin user: ${adminUsername}`);
+    const adminDisplayName = process.env.ADMIN_DISPLAY_NAME || "Admin";
+    createUser({
+      email: adminEmail,
+      password: adminPassword,
+      role: "admin",
+      displayName: adminDisplayName,
+      username: "admin",
+    });
+    console.log(`[DB] Created default admin user: ${adminEmail}`);
   }
 
-  // Seed default forum categories
-  const categoryCount = (
-    db.prepare(`SELECT COUNT(*) as count FROM forum_categories`).get() as {
-      count: number;
-    }
-  ).count;
-
+  const categoryCount = (db.prepare(`SELECT COUNT(*) as count FROM forum_categories`).get() as { count: number }).count;
   if (categoryCount === 0) {
     const categories = [
       { id: "welfare", name: "福利羊毛", description: "API 优惠活动、免费额度、促销信息汇总", icon: "Gift", color: "#22c55e", sortOrder: 1, readOnly: 1 },
@@ -631,11 +1115,11 @@ function seedData() {
     const stmt = db.prepare(
       `INSERT INTO forum_categories (id, name, description, icon, color, sortOrder, readOnly) VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
-    for (const c of categories) {
-      stmt.run(c.id, c.name, c.description, c.icon, c.color, c.sortOrder, c.readOnly);
-    }
+    for (const c of categories) stmt.run(c.id, c.name, c.description, c.icon, c.color, c.sortOrder, c.readOnly);
     console.log("[DB] Seeded 6 default forum categories");
   }
+
+  seedPlatformConfig();
 }
 
 seedData();

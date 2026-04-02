@@ -19,6 +19,9 @@ export const metadata: Metadata = {
   description:
     "极客级 AI API 中转站实时评测平台。对比连通率、延迟、计费倍率，找到最优性价比的 AI API 中转服务。",
   keywords: ["AI API", "中转站", "评测", "GPT", "Claude", "连通率", "延迟"],
+  icons: {
+    icon: "/favicon.png",
+  },
 };
 
 export default function RootLayout({
@@ -50,7 +53,7 @@ export default function RootLayout({
               </div>
 
               <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-[var(--muted)]">
-                <Link href="/" className="hover:text-[var(--accent-strong)]">首页</Link>
+                <Link href="/" className="hover:text-[var(--accent-strong)]">SK-首页</Link>
                 <Link href="/forum" className="hover:text-[var(--accent-strong)]">社区论坛</Link>
                 <Link href="/forum/c/guide" className="hover:text-[var(--accent-strong)]">新手指南</Link>
                 <Link href="/forum/c/welfare" className="hover:text-[var(--accent-strong)]">福利羊毛</Link>

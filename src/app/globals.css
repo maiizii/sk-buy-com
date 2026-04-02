@@ -208,12 +208,15 @@ body::before {
 .badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
+  min-height: 24px;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 11px;
-  line-height: 1;
+  font-size: 12px;
+  line-height: 1.25;
   font-weight: 600;
+  font-family: var(--font-sans);
   white-space: nowrap;
   border: 1px solid transparent;
 }
@@ -493,15 +496,28 @@ body::before {
   background: var(--card-hover);
 }
 
-.forum-tag {
+.forum-tag,
+.soft-tag {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
+  min-height: 28px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  color: var(--accent-strong);
-  font-size: 11px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: color-mix(in srgb, var(--accent-strong) 86%, var(--foreground));
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1.25;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.soft-tag-muted {
+  border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: color-mix(in srgb, var(--foreground) 72%, white 28%);
 }
 
 .auth-modal-card {

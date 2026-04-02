@@ -1,52 +1,56 @@
-import {
-  getUserByUsername,
-  verifyPassword,
-  createSession,
-} from "@/lib/db";
-import { cookies } from "next/headers";
+import { getUserByEmail, verifyPassword, createSession } from "@/lib/db";
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const { username, password } = await request.json();
+    const { email, password } = await request.json();
 
-    if (!username || !password) {
-      return Response.json(
-        { success: false, error: "用户名和密码不能为空" },
-        { status: 400 }
+    if (!email || !password) {
+      return NextResponse.json(
+        { success: false, error: "邮箱和密码不能为空" },
+        { status: 400, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    const user = getUserByUsername(username);
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = getUserByEmail(normalizedEmail);
     if (!user || !verifyPassword(password, user.passwordHash)) {
-      return Response.json(
-        { success: false, error: "用户名或密码错误" },
-        { status: 401 }
+      return NextResponse.json(
+        { success: false, error: "邮箱或密码错误" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
       );
     }
 
     const token = createSession(user.id);
-    const cookieStore = await cookies();
-    cookieStore.set("sk-session", token, {
+    const response = NextResponse.json(
+      {
+        success: true,
+        data: {
+          id: user.id,
+          username: user.username,
+          displayName: user.displayName,
+          email: user.email,
+          role: user.role,
+        },
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+
+    response.cookies.set("sk-session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60, // 7 days
+      maxAge: 7 * 24 * 60 * 60,
       path: "/",
     });
 
-    return Response.json({
-      success: true,
-      data: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-      },
-    });
+    return response;
   } catch {
-    return Response.json(
+    return NextResponse.json(
       { success: false, error: "登录失败" },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }
