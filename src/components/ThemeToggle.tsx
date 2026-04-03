@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
+import { useMessages } from "@/lib/i18n-client";
 
 const STORAGE_KEY = "sk-buy-theme";
 
@@ -30,6 +31,7 @@ function subscribe(callback: () => void) {
 }
 
 export function ThemeToggle() {
+  const t = useMessages();
   const dark = useSyncExternalStore(subscribe, getPreferredDark, () => false);
 
   useEffect(() => {
@@ -49,8 +51,8 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--card)] text-[var(--foreground)] shadow-sm transition-all hover:-translate-y-0.5 hover:border-[var(--accent)]/35 hover:shadow-md"
-      aria-label="切换主题"
-      title={dark ? "切换为浅色模式" : "切换为深色模式"}
+      aria-label={t.common.switchTheme}
+      title={dark ? t.common.switchToLight : t.common.switchToDark}
     >
       {dark ? (
         <Sun className="h-4 w-4 text-amber-400" />

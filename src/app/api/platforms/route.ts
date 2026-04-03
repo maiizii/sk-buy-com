@@ -65,23 +65,27 @@ export async function POST(request: Request) {
       );
     }
 
-    const platform = createPlatform({
-      id,
-      name,
-      url,
-      baseUrl: data.baseUrl || "",
-      monitorEnabled: data.monitorEnabled || false,
-      tag,
-      tagLabel,
-      billingRate,
-      billingColor: data.billingColor || "text-foreground",
-      models: normalizeModels(data.models),
-      uptime: data.uptime || 0,
-      latency: data.latency || 0,
-      joinDate: data.joinDate || new Date().toISOString().split("T")[0],
-      description: data.description || "",
-      sortOrder: data.sortOrder || 0,
-    });
+     const platform = createPlatform({
+       id,
+       name,
+       url,
+       baseUrl: data.baseUrl || "",
+       monitorEnabled: data.monitorEnabled || false,
+       tag,
+       tagLabel,
+       billingRate,
+       billingColor: data.billingColor || "text-foreground",
+       models: normalizeModels(data.models),
+       uptime: data.uptime || 0,
+       latency: data.latency || 0,
+       joinDate: data.joinDate || new Date().toISOString().split("T")[0],
+       description: data.descriptionZh || data.description || data.descriptionEn || "",
+       sortOrder: data.sortOrder || 0,
+       metaJson: JSON.stringify({
+         descriptionZh: String(data.descriptionZh || data.description || "").trim(),
+         descriptionEn: String(data.descriptionEn || "").trim(),
+       }),
+     });
 
     replacePlatformAttributeValues(platform.id, normalizeAttributeValues(data.attributeValues));
 
@@ -103,23 +107,27 @@ export async function PUT(request: Request) {
       return Response.json({ success: false, error: "缺少平台 id" }, { status: 400 });
     }
 
-    const platform = updatePlatform(id, {
-      name: data.name,
-      url: data.url,
-      baseUrl: data.baseUrl || "",
-      monitorEnabled: !!data.monitorEnabled,
-      tag: data.tag,
-      tagLabel: data.tagLabel,
-      billingRate: data.billingRate,
-      billingColor: data.billingColor || "text-foreground",
-      models: normalizeModels(data.models),
-      uptime: data.uptime || 0,
-      latency: data.latency || 0,
-      joinDate: data.joinDate,
-      description: data.description || "",
-      sortOrder: data.sortOrder || 0,
-      status: data.status || "active",
-    });
+     const platform = updatePlatform(id, {
+       name: data.name,
+       url: data.url,
+       baseUrl: data.baseUrl || "",
+       monitorEnabled: !!data.monitorEnabled,
+       tag: data.tag,
+       tagLabel: data.tagLabel,
+       billingRate: data.billingRate,
+       billingColor: data.billingColor || "text-foreground",
+       models: normalizeModels(data.models),
+       uptime: data.uptime || 0,
+       latency: data.latency || 0,
+       joinDate: data.joinDate,
+       description: data.descriptionZh || data.description || data.descriptionEn || "",
+       sortOrder: data.sortOrder || 0,
+       status: data.status || "active",
+       metaJson: JSON.stringify({
+         descriptionZh: String(data.descriptionZh || data.description || "").trim(),
+         descriptionEn: String(data.descriptionEn || "").trim(),
+       }),
+     });
 
     if (!platform) {
       return Response.json({ success: false, error: "平台不存在" }, { status: 404 });

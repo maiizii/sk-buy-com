@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
+import { PixelAvatar } from "@/components/PixelAvatar";
 import remarkGfm from "remark-gfm";
 import { timeAgo } from "@/lib/utils";
 import {
@@ -12,7 +13,6 @@ import {
   Clock,
   Lock,
   Pin,
-  User,
   Send,
   Trash2,
 } from "lucide-react";
@@ -231,9 +231,12 @@ export default function TopicDetailPage({
 
         {/* Author info */}
         <div className="flex items-center gap-3 mt-4 pt-4 border-t border-[var(--border-color)]">
-          <div className="nav-avatar">
-            <User className="w-3 h-3" />
-          </div>
+          <PixelAvatar
+            seed={topic.authorName || topic.authorId || "anonymous"}
+            alt={topic.authorName || "anonymous"}
+            size={30}
+            className="nav-avatar overflow-hidden"
+          />
           <div className="text-xs font-mono">
             <span className="font-semibold">{topic.authorName}</span>
             <span className="text-muted ml-2 inline-flex items-center gap-1">
@@ -278,9 +281,12 @@ export default function TopicDetailPage({
               <div key={reply.id} className="forum-card p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2 text-xs font-mono">
-                    <div className="nav-avatar" style={{ width: 20, height: 20 }}>
-                      <User className="w-2.5 h-2.5" />
-                    </div>
+                    <PixelAvatar
+                      seed={reply.authorName || reply.authorId || "anonymous"}
+                      alt={reply.authorName || "anonymous"}
+                      size={20}
+                      className="nav-avatar overflow-hidden"
+                    />
                     <span className="font-semibold">{reply.authorName}</span>
                     <span className="text-muted">#{idx + 1}</span>
                     <span className="text-muted inline-flex items-center gap-1">

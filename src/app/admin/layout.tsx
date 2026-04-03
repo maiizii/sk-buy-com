@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { getMessages } from "@/lib/i18n";
+
+const t = getMessages();
 
 export const metadata: Metadata = {
-  title: "管理后台 — sk-buy.com",
-  description: "sk-buy.com 平台管理后台",
+  title: t.metadata.adminTitle,
+  description: t.metadata.adminDescription,
 };
 
 export default function AdminLayout({

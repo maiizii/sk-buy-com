@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronDown,
   ChevronRight,
@@ -12,17 +12,18 @@ import {
   Menu,
   MessageCircle,
   MessageSquare,
+  Search,
   Settings,
   Shield,
   Sparkles,
-  User,
   X,
-  Search,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { LanguageToggle } from "./LanguageToggle";
 import { AuthModal } from "./AuthModal";
-import { getMessages } from "@/lib/i18n";
+import { useMessages } from "@/lib/i18n-client";
 import { getUserDisplayName } from "@/lib/auth-schema";
+import { PixelAvatar } from "./PixelAvatar";
 
 interface UserInfo {
   id: number;
@@ -37,18 +38,24 @@ interface ForumCategory {
   name: string;
 }
 
-const t = getMessages();
-
-const PRIMARY_NAV = [
-  { label: t.common.home, href: "/", icon: LayoutDashboard, exact: true },
-  { label: t.common.discover, href: "/discover", icon: Search },
-  { label: t.common.forum, href: "/forum", icon: MessageCircle },
-  { label: t.common.welfare, href: "/forum/c/welfare", icon: Sparkles },
-  { label: t.common.guide, href: "/forum/c/guide", icon: Shield },
-];
+function getIsDarkMode() {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.classList.contains("dark");
+}
 
 export function Navbar() {
+  const t = useMessages();
+  const PRIMARY_NAV = [
+    { label: t.common.home, href: "/", icon: LayoutDashboard, exact: true },
+    { label: t.common.discover, href: "/discover", icon: Search },
+    { label: t.common.forum, href: "/forum", icon: MessageCircle },
+    { label: t.common.welfare, href: "/forum/c/welfare", icon: Sparkles },
+    { label: t.common.guide, href: "/forum/c/guide", icon: Shield },
+  ];
+
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
@@ -57,6 +64,10 @@ export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [forumOpen, setForumOpen] = useState(true);
   const [categories, setCategories] = useState<ForumCategory[]>([]);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [authNotice, setAuthNotice] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
 
   const checkAuth = useCallback(() => {
     fetch("/api/auth/me", { credentials: "include", cache: "no-store" })
@@ -79,6 +90,48 @@ export function Navbar() {
       .catch(() => setCategories([]));
   }, [checkAuth]);
 
+  useEffect(() => {
+    const syncTheme = () => setIsDarkMode(getIsDarkMode());
+    syncTheme();
+    window.addEventListener("sk-buy-theme-change", syncTheme);
+    window.addEventListener("storage", syncTheme);
+    return () => {
+      window.removeEventListener("sk-buy-theme-change", syncTheme);
+      window.removeEventListener("storage", syncTheme);
+    };
+  }, []);
+
+  useEffect(() => {
+    const verificationStatus = searchParams.get("emailVerification");
+    const message = searchParams.get("message") || "";
+    const email = searchParams.get("email") || "";
+
+    if (!verificationStatus) return;
+
+    const timer = window.setTimeout(() => {
+      setAuthTab("login");
+      setVerificationEmail(email);
+
+      if (verificationStatus === "success") {
+        setAuthNotice(message || "邮箱验证成功，已自动登录");
+        setAuthError("");
+        checkAuth();
+      } else {
+        setAuthNotice("");
+        setAuthError(message || "邮箱验证失败");
+        setShowAuth(true);
+      }
+    }, 0);
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete("emailVerification");
+    nextParams.delete("message");
+    nextParams.delete("email");
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+
+    return () => window.clearTimeout(timer);
+  }, [checkAuth, pathname, router, searchParams]);
 
   const isActive = (href: string, exact?: boolean) => {
     if (exact) return pathname === href;
@@ -116,6 +169,9 @@ export function Navbar() {
     setShowDropdown(false);
     setMobileOpen(false);
     setAuthChecked(true);
+    setAuthNotice("");
+    setAuthError("");
+    setVerificationEmail("");
   };
 
   const handleLogout = async () => {
@@ -128,6 +184,11 @@ export function Navbar() {
     setShowDropdown(false);
   };
 
+  const currentUser = user;
+  const currentUserDisplayName = currentUser
+    ? getUserDisplayName(currentUser)
+    : "";
+
   return (
     <>
       <div className="app-shell">
@@ -136,7 +197,7 @@ export function Navbar() {
             type="button"
             className="fixed inset-0 z-40 bg-black/40 lg:hidden"
             onClick={() => setMobileOpen(false)}
-            aria-label="关闭侧边栏"
+            aria-label={t.common.closeSidebar}
           />
         )}
 
@@ -148,7 +209,7 @@ export function Navbar() {
           <div className="flex items-center justify-between px-2 py-2">
             <Link href="/">
               <Image
-                src="/logo200x54.png"
+                src={isDarkMode ? "/logo200x54_d.png" : "/logo200x54.png"}
                 alt="sk-buy.com"
                 width={200}
                 height={54}
@@ -167,7 +228,7 @@ export function Navbar() {
           <div className="mt-6 space-y-6 overflow-y-auto pr-1">
             <div>
               <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]/80">
-                Navigation
+                {t.common.navigation}
               </p>
               <nav className="space-y-1.5">
                 {PRIMARY_NAV.map((item) => {
@@ -190,8 +251,12 @@ export function Navbar() {
                   onClick={() => setForumOpen((prev) => !prev)}
                 >
                   <MessageSquare className="h-4 w-4" />
-                  <span className="flex-1 text-left">论坛板块</span>
-                  {forumOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  <span className="flex-1 text-left">{t.common.forumSections}</span>
+                  {forumOpen ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
                 </button>
 
                 {forumOpen && (
@@ -208,7 +273,9 @@ export function Navbar() {
                         </Link>
                       ))
                     ) : (
-                      <div className="px-6 py-2 text-xs text-[var(--muted)]">正在加载板块...</div>
+                      <div className="px-6 py-2 text-xs text-[var(--muted)]">
+                        {t.common.loadingSections}
+                      </div>
                     )}
                   </div>
                 )}
@@ -232,46 +299,83 @@ export function Navbar() {
                 <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted)]">
                   {t.common.workspace}
                 </p>
-                <h1 className="truncate text-lg font-semibold">{t.common.siteTitle}</h1>
+                <h1 className="truncate text-lg font-semibold">
+                  {t.common.siteTitle}
+                </h1>
               </div>
 
               <div className="flex items-center gap-2">
-                <ThemeToggle />
-
-                {authChecked && !user && (
-                  <div className="hidden items-center gap-2 sm:flex">
-                    <button onClick={openLogin} className="nav-auth-btn">{t.common.login}</button>
-                    <button onClick={openRegister} className="nav-auth-btn nav-auth-btn-primary">{t.common.register}</button>
+                {authNotice && !showAuth && (
+                  <div className="hidden max-w-[320px] rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 sm:block">
+                    {authNotice}
                   </div>
                 )}
 
-                {authChecked && user && (
+                <LanguageToggle />
+                <ThemeToggle />
+
+                {authChecked && !currentUser && (
+                  <div className="hidden items-center gap-2 sm:flex">
+                    <button onClick={openLogin} className="nav-auth-btn">
+                      {t.common.login}
+                    </button>
+                    <button
+                      onClick={openRegister}
+                      className="nav-auth-btn nav-auth-btn-primary"
+                    >
+                      {t.common.register}
+                    </button>
+                  </div>
+                )}
+
+                {authChecked && currentUser && (
                   <div className="relative">
-                    <button className="nav-user-btn" onClick={() => setShowDropdown((v) => !v)}>
-                      <span className="nav-avatar">
-                        <User className="h-4 w-4" />
-                      </span>
+                    <button
+                      className="nav-user-btn"
+                      onClick={() => setShowDropdown((v) => !v)}
+                    >
+                      <PixelAvatar
+                        seed={currentUser.username || currentUser.email || currentUser.id}
+                        alt={currentUserDisplayName}
+                        size={30}
+                        className="nav-avatar overflow-hidden"
+                      />
                       <span className="hidden max-w-[120px] truncate text-sm sm:inline">
-                        {getUserDisplayName(user)}
+                        {currentUserDisplayName}
                       </span>
                       <ChevronDown className="h-4 w-4 text-[var(--muted)]" />
                     </button>
 
                     {showDropdown && (
                       <>
-                        <button className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} aria-label="关闭菜单" />
+                        <button
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowDropdown(false)}
+                          aria-label={t.common.closeMenu}
+                        />
                         <div className="nav-dropdown">
                           <div className="border-b border-[var(--border-color)] px-4 py-3">
-                            <p className="text-sm font-semibold">{getUserDisplayName(user)}</p>
-                            <p className="mt-1 text-xs text-[var(--muted)]">{user.email}</p>
+                            <p className="text-sm font-semibold">
+                              {currentUserDisplayName}
+                            </p>
+                            <p className="mt-1 text-xs text-[var(--muted)]">
+                              {currentUser.email}
+                            </p>
                           </div>
-                          {user.role === "admin" && (
-                            <Link href="/admin" className="nav-dropdown-item" onClick={() => setShowDropdown(false)}>
+                          {currentUser.role === "admin" && (
+                            <Link
+                              href="/admin"
+                              className="nav-dropdown-item"
+                              onClick={() => setShowDropdown(false)}
+                            >
                               <Settings className="h-4 w-4" />
                               {t.common.admin}
                             </Link>
                           )}
-                          <button onClick={handleLogout} className="nav-dropdown-item">
+                          <button
+                            onClick={handleLogout}
+                            className="nav-dropdown-item"
+                          >
                             <LogOut className="h-4 w-4" />
                             {t.common.logout}
                           </button>
@@ -289,7 +393,13 @@ export function Navbar() {
       <AuthModal
         isOpen={showAuth}
         defaultTab={authTab}
-        onClose={() => setShowAuth(false)}
+        initialNotice={authNotice}
+        initialError={authError}
+        initialVerificationEmail={verificationEmail}
+        onClose={() => {
+          setShowAuth(false);
+          setAuthError("");
+        }}
         onSuccess={handleAuthSuccess}
       />
     </>

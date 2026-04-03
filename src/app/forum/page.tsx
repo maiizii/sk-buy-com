@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { timeAgo } from "@/lib/utils";
+import { PixelAvatar } from "@/components/PixelAvatar";
 import {
   MessageCircle,
   Gift,
@@ -17,6 +18,7 @@ import {
   PenSquare,
   Lock,
 } from "lucide-react";
+import { getMessages } from "@/lib/i18n";
 
 // ============================================================
 // Types
@@ -77,6 +79,7 @@ function CategoryIcon({ name, color }: { name: string; color: string }) {
 // Page
 // ============================================================
 export default function ForumHome() {
+  const t = getMessages();
   const [categories, setCategories] = useState<Category[]>([]);
   const [recentTopics, setRecentTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,7 +100,7 @@ export default function ForumHome() {
   if (loading) {
     return (
       <main className="w-full py-12">
-        <div className="text-center text-muted font-mono animate-pulse">加载中...</div>
+        <div className="text-center text-muted font-mono animate-pulse">{t.common.loading}</div>
       </main>
     );
   }
@@ -107,21 +110,21 @@ export default function ForumHome() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold font-mono">社区论坛</h1>
+          <h1 className="text-xl font-bold font-mono">{t.forumPage.title}</h1>
           <p className="text-sm text-muted mt-1">
-            交流 AI API 使用经验、获取福利信息、参与站点评测
+            {t.forumPage.subtitle}
           </p>
         </div>
         <Link href="/forum/new" className="btn-glass btn-glass-primary">
           <PenSquare className="w-4 h-4" />
-          发帖
+          {t.forumPage.createTopic}
         </Link>
       </div>
 
       {/* Categories Grid */}
       <section>
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4">
-          板块分区
+          {t.forumPage.sections}
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {categories.map((cat) => (
@@ -136,7 +139,7 @@ export default function ForumHome() {
                   <h3 className="font-semibold text-sm">{cat.name}</h3>
                   {cat.readOnly && (
                     <span className="text-[10px] text-muted px-1.5 py-0.5 rounded bg-[var(--border-color)]">
-                      官方
+                      {t.forumPage.official}
                     </span>
                   )}
                 </div>
@@ -144,7 +147,7 @@ export default function ForumHome() {
                   {cat.description}
                 </p>
                 <p className="text-[10px] text-muted font-mono mt-1.5">
-                  {cat.topicCount} 个主题
+                  {cat.topicCount} {t.forumPage.topicCountSuffix}
                 </p>
               </div>
             </Link>
@@ -157,13 +160,13 @@ export default function ForumHome() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-muted uppercase tracking-wider flex items-center gap-2">
             <TrendingUp className="w-4 h-4" />
-            最新帖子
+            {t.forumPage.latestTopics}
           </h2>
         </div>
         <div className="forum-card overflow-hidden">
           {recentTopics.length === 0 ? (
             <div className="py-16 text-center text-muted text-sm">
-              暂无帖子，来发布第一个帖子吧！
+              {t.forumPage.noTopics}
             </div>
           ) : (
             recentTopics.map((topic) => (
@@ -176,7 +179,7 @@ export default function ForumHome() {
                   <div className="flex items-center gap-2 flex-wrap">
                     {topic.pinned && (
                       <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                        置顶
+                        {t.forumPage.pinned}
                       </span>
                     )}
                     {topic.locked && <Lock className="w-3 h-3 text-muted" />}
@@ -188,7 +191,15 @@ export default function ForumHome() {
                     </h3>
                   </div>
                   <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted font-mono">
-                    <span>{topic.authorName}</span>
+                    <span className="inline-flex items-center gap-2">
+                      <PixelAvatar
+                        seed={topic.authorName || topic.authorId || "anonymous"}
+                        alt={topic.authorName || "anonymous"}
+                        size={20}
+                        className="nav-avatar overflow-hidden"
+                      />
+                      <span>{topic.authorName}</span>
+                    </span>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {timeAgo(topic.createdAt)}

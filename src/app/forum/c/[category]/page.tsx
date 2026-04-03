@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { timeAgo } from "@/lib/utils";
+import { PixelAvatar } from "@/components/PixelAvatar";
 import {
   ArrowLeft,
   PenSquare,
@@ -178,9 +179,17 @@ export default function CategoryPage({
                   {topic.locked && <Lock className="w-3 h-3 text-muted" />}
                   <h3 className="text-sm font-medium">{topic.title}</h3>
                 </div>
-                <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted font-mono">
-                  <span>{topic.authorName}</span>
-                  <span className="flex items-center gap-1">
+                 <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted font-mono">
+                   <span className="inline-flex items-center gap-2">
+                     <PixelAvatar
+                       seed={topic.authorName || "anonymous"}
+                       alt={topic.authorName || "anonymous"}
+                       size={20}
+                       className="nav-avatar overflow-hidden"
+                     />
+                     <span>{topic.authorName}</span>
+                   </span>
+                   <span className="flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     {timeAgo(topic.createdAt)}
                   </span>

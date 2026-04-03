@@ -1,4 +1,5 @@
-import { getUserByEmail, createUser, createSession } from "@/lib/db";
+import { createEmailVerificationChallenge, createUser, getUserByEmail } from "@/lib/db";
+import { sendVerificationEmail } from "@/lib/mailer";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -48,25 +49,39 @@ export async function POST(request: Request) {
       role: "user",
       displayName: normalizedDisplayName,
     });
-    const token = createSession(user.id);
 
-    const response = NextResponse.json(
-      { success: true, data: user },
-      { status: 201, headers: { "Cache-Control": "no-store" } }
-    );
+    const verification = createEmailVerificationChallenge(user.id);
+    const url = new URL(request.url);
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || url.origin;
+    const verificationUrl = new URL(`/api/auth/verify-email?token=${verification.token}`, baseUrl).toString();
 
-    response.cookies.set("sk-session", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60,
-      path: "/",
+    await sendVerificationEmail({
+      to: user.email,
+      displayName: user.displayName,
+      verificationUrl,
+      verificationCode: verification.code,
     });
 
-    return response;
-  } catch {
     return NextResponse.json(
-      { success: false, error: "注册失败" },
+      {
+        success: true,
+        data: {
+          email: user.email,
+          displayName: user.displayName,
+          emailVerified: false,
+          verificationMethod: "code_or_link",
+        },
+        message: "注册成功，验证码和验证链接已发送到你的邮箱",
+      },
+      { status: 201, headers: { "Cache-Control": "no-store" } }
+    );
+  } catch (error) {
+    console.error("[auth/register] failed:", error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "注册失败",
+      },
       { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }

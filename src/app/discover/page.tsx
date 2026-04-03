@@ -105,7 +105,7 @@ function logsToTrackerData(logs: ConnectivityLog[], nodeCount: number = 24): Tra
   const emptyCount = Math.max(0, nodeCount - recentLogs.length);
 
   for (let i = 0; i < emptyCount; i++) {
-    data.push({ color: "bg-slate-300/80 dark:bg-slate-700/80", tooltip: "暂无数据" });
+    data.push({ color: "bg-slate-300/80 dark:bg-slate-700/80", tooltip: getMessages().common.noData });
   }
 
   for (const log of recentLogs) {
@@ -115,7 +115,7 @@ function logsToTrackerData(logs: ConnectivityLog[], nodeCount: number = 24): Tra
     });
     data.push({
       color: log.success ? (log.latency > 1500 ? "bg-amber-400" : "bg-emerald-500") : "bg-rose-500",
-      tooltip: log.success ? `${time} · ${log.latency}ms` : `${time} · ${log.errorMessage || "连接失败"}`,
+      tooltip: log.success ? `${time} · ${log.latency}ms` : `${time} · ${log.errorMessage || getMessages().common.connectionFailed}`,
     });
   }
 
@@ -125,7 +125,7 @@ function logsToTrackerData(logs: ConnectivityLog[], nodeCount: number = 24): Tra
 function generateGreyTrackerData(nodeCount: number = 24): TrackerBlockProps[] {
   return Array.from({ length: nodeCount }, () => ({
     color: "bg-slate-200 dark:bg-slate-700/70",
-    tooltip: "未启用连通监控",
+    tooltip: getMessages().common.monitoringDisabled,
   }));
 }
 
@@ -316,7 +316,7 @@ export default function DiscoverPage() {
           </div>
           <Link href="/admin" className="btn-glass">
             <Settings2 className="h-4 w-4" />
-            配置后台
+            {t.discoverPage.configureAdmin}
           </Link>
         </div>
 
@@ -335,7 +335,7 @@ export default function DiscoverPage() {
             </select>
           </label>
           <div className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">监控筛选</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">{t.discoverPage.monitoringFilter}</span>
             <button type="button" onClick={() => setMonitoredOnly((v) => !v)} className={`admin-input flex w-full items-center justify-center text-center whitespace-nowrap ${monitoredOnly ? "border-emerald-500/40 text-emerald-500" : ""}`}>
               <span>{t.home.monitorOnly}</span>
             </button>
@@ -346,10 +346,10 @@ export default function DiscoverPage() {
           <div className="mt-5 rounded-2xl border border-[var(--border-color)] bg-[var(--card)]/70 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold">综合属性筛选</p>
-                <p className="mt-1 text-xs text-[var(--muted)]">多个属性会紧凑排布，避免同一行留太多空白</p>
+                <p className="text-sm font-semibold">{t.discoverPage.advancedFilterTitle}</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">{t.discoverPage.advancedFilterDescription}</p>
               </div>
-              <button type="button" onClick={resetFilters} className="btn-glass">重置筛选</button>
+              <button type="button" onClick={resetFilters} className="btn-glass">{t.discoverPage.resetFilters}</button>
             </div>
             <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
               {filterableGroups.map((group) => {
@@ -400,12 +400,12 @@ export default function DiscoverPage() {
             <table className="min-w-full table-fixed text-sm">
               <thead>
                 <tr className="border-b border-[var(--border-color)] text-left text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-                  <th className="w-[230px] px-5 py-4">平台</th>
-                  <th className="w-[86px] px-3 py-4">倍率</th>
-                  <th className="w-[190px] px-3 py-4">主推模型</th>
-                  <th className="w-[380px] px-3 py-4">其他标签</th>
-                  <th className="w-[220px] px-3 py-4">连通率</th>
-                  <th className="w-[144px] px-5 py-4 text-right">操作</th>
+                  <th className="w-[230px] px-5 py-4">{t.discoverPage.tablePlatform}</th>
+                  <th className="w-[86px] px-3 py-4">{t.discoverPage.tableBilling}</th>
+                  <th className="w-[190px] px-3 py-4">{t.discoverPage.tableModels}</th>
+                  <th className="w-[380px] px-3 py-4">{t.discoverPage.tableOtherTags}</th>
+                  <th className="w-[220px] px-3 py-4">{t.discoverPage.tableUptime}</th>
+                  <th className="w-[144px] px-5 py-4 text-right">{t.discoverPage.tableActions}</th>
                 </tr>
               </thead>
               <tbody>
@@ -459,7 +459,7 @@ export default function DiscoverPage() {
                         <div className="space-y-2">
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-semibold text-[var(--accent-strong)]">{effectiveUptime}%</span>
-                            <span className="text-[var(--muted)]">{platform.monitorEnabled ? `${Math.round(effectiveLatency)}ms` : "未监控"}</span>
+                            <span className="text-[var(--muted)]">{platform.monitorEnabled ? `${Math.round(effectiveLatency)}ms` : t.discoverPage.unmonitored}</span>
                           </div>
                           <Tracker data={trackerData} className="h-5" hoverEffect={platform.monitorEnabled} />
                         </div>
@@ -467,9 +467,9 @@ export default function DiscoverPage() {
                       <td className="px-5 py-4 align-top text-right">
                         <div className="flex justify-end gap-2">
                           <a href={`https://${platform.url}`} target="_blank" rel="noreferrer" className="btn-glass">
-                            <ExternalLink className="h-3.5 w-3.5" />访问
+                            <ExternalLink className="h-3.5 w-3.5" />{t.common.visit}
                           </a>
-                          <Link href={`/forum/tag/${platform.id}`} className="btn-glass btn-glass-primary">点评</Link>
+                          <Link href={`/forum/tag/${platform.id}`} className="btn-glass btn-glass-primary">{t.common.review}</Link>
                         </div>
                       </td>
                     </tr>

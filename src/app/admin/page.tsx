@@ -38,6 +38,8 @@ interface Platform {
   models?: string[];
   joinDate?: string;
   description?: string;
+  descriptionZh?: string;
+  descriptionEn?: string;
   sortOrder?: number;
   monitorEnabled: boolean;
   status: string;
@@ -47,6 +49,8 @@ interface GroupRecord {
   id: string;
   key: string;
   label: string;
+  labelZh?: string;
+  labelEn?: string;
   inputType: string;
   enabled: boolean;
   isFilterable?: boolean;
@@ -61,6 +65,8 @@ interface OptionRecord {
   groupKey: string;
   value: string;
   label: string;
+  labelZh?: string;
+  labelEn?: string;
   color?: string;
   enabled: boolean;
   sortOrder?: number;
@@ -78,6 +84,8 @@ const t = getMessages();
 const emptyGroupForm: {
   id: string;
   label: string;
+  labelZh: string;
+  labelEn: string;
   key: string;
   inputType: string;
   enabled: boolean;
@@ -89,6 +97,8 @@ const emptyGroupForm: {
 } = {
   id: "",
   label: "",
+  labelZh: "",
+  labelEn: "",
   key: "",
   inputType: "single_select",
   enabled: true,
@@ -105,6 +115,8 @@ const emptyOptionForm = {
   id: "",
   groupKey: "",
   label: "",
+  labelZh: "",
+  labelEn: "",
   value: "",
   color: DEFAULT_TAG_COLOR,
   enabled: true,
@@ -123,6 +135,8 @@ const emptyPlatformForm = {
   modelsText: "",
   joinDate: new Date().toISOString().split("T")[0],
   description: "",
+  descriptionZh: "",
+  descriptionEn: "",
   sortOrder: 0,
   monitorEnabled: false,
   status: "active",
@@ -386,7 +400,9 @@ export default function AdminPage() {
         billingColor: platformForm.billingColor,
         models: featuredModelsGroup ? featuredModelNames : platformForm.modelsText,
         joinDate: platformForm.joinDate,
-        description: platformForm.description,
+        description: platformForm.descriptionZh || platformForm.description || platformForm.descriptionEn,
+        descriptionZh: platformForm.descriptionZh || platformForm.description || "",
+        descriptionEn: platformForm.descriptionEn || "",
         sortOrder: Number(platformForm.sortOrder || 0),
         monitorEnabled: platformForm.monitorEnabled,
         status: platformForm.status,
@@ -424,6 +440,8 @@ export default function AdminPage() {
       modelsText: (platform.models || []).join(", "),
       joinDate: platform.joinDate || new Date().toISOString().split("T")[0],
       description: platform.description || "",
+      descriptionZh: platform.descriptionZh || platform.description || "",
+      descriptionEn: platform.descriptionEn || "",
       sortOrder: platform.sortOrder || 0,
       monitorEnabled: !!platform.monitorEnabled,
       status: platform.status || "active",
@@ -541,7 +559,8 @@ export default function AdminPage() {
         <div className="admin-card p-6 space-y-4">
           <div className="flex items-center gap-2"><Shapes className="h-4 w-4 text-[var(--accent-strong)]" /><h3 className="text-base font-semibold">新增 / 编辑属性分组</h3></div>
           <form onSubmit={submitGroup} className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 md:col-span-2"><span className="admin-label">分组名称</span><input className="admin-input" value={groupForm.label} onChange={(e) => setGroupForm((s) => ({ ...s, label: e.target.value }))} required /></label>
+            <label className="space-y-2"><span className="admin-label">分组名称（中文）</span><input className="admin-input" value={groupForm.labelZh} onChange={(e) => setGroupForm((s) => ({ ...s, labelZh: e.target.value, label: e.target.value }))} required /></label>
+            <label className="space-y-2"><span className="admin-label">分组名称（英文）</span><input className="admin-input" value={groupForm.labelEn} onChange={(e) => setGroupForm((s) => ({ ...s, labelEn: e.target.value }))} placeholder="Route type" /></label>
             <label className="space-y-2"><span className="admin-label">Key（可选）</span><input className="admin-input" value={groupForm.key} onChange={(e) => setGroupForm((s) => ({ ...s, key: e.target.value }))} placeholder="route_type" /></label>
             <label className="space-y-2"><span className="admin-label">类型</span><select className="admin-input" value={groupForm.inputType} onChange={(e) => setGroupForm((s) => ({ ...s, inputType: e.target.value }))}><option value="single_select">单选</option><option value="multi_select">多选</option><option value="boolean">布尔</option><option value="model_selector">模型选择器</option></select></label>
             <label className="space-y-2"><span className="admin-label">排序</span><input type="number" className="admin-input" value={groupForm.sortOrder} onChange={(e) => setGroupForm((s) => ({ ...s, sortOrder: Number(e.target.value) }))} /></label>
@@ -576,7 +595,8 @@ export default function AdminPage() {
           <div className="flex items-center gap-2"><Plus className="h-4 w-4 text-[var(--accent-strong)]" /><h3 className="text-base font-semibold">新增 / 编辑标签选项</h3></div>
           <form onSubmit={submitOption} className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 md:col-span-2"><span className="admin-label">所属分组</span><select className="admin-input" value={optionForm.groupKey} onChange={(e) => setOptionForm((s) => ({ ...s, groupKey: e.target.value }))} required><option value="">请选择分组</option>{configSummary.groups.map((group) => <option key={group.id} value={group.key}>{group.label}（{group.key}）</option>)}</select></label>
-            <label className="space-y-2"><span className="admin-label">标签名称</span><input className="admin-input" value={optionForm.label} onChange={(e) => setOptionForm((s) => ({ ...s, label: e.target.value }))} required /></label>
+            <label className="space-y-2"><span className="admin-label">标签名称（中文）</span><input className="admin-input" value={optionForm.labelZh} onChange={(e) => setOptionForm((s) => ({ ...s, labelZh: e.target.value, label: e.target.value }))} required /></label>
+            <label className="space-y-2"><span className="admin-label">标签名称（英文）</span><input className="admin-input" value={optionForm.labelEn} onChange={(e) => setOptionForm((s) => ({ ...s, labelEn: e.target.value }))} placeholder="Global route" /></label>
             <label className="space-y-2"><span className="admin-label">值编码（可选）</span><input className="admin-input" value={optionForm.value} onChange={(e) => setOptionForm((s) => ({ ...s, value: e.target.value }))} placeholder="cn_direct" /></label>
             <label className="space-y-2"><span className="admin-label">标签颜色</span><input type="color" className="admin-input h-11" value={optionForm.color || DEFAULT_TAG_COLOR} onChange={(e) => setOptionForm((s) => ({ ...s, color: e.target.value || DEFAULT_TAG_COLOR }))} /></label>
             <label className="space-y-2 md:col-span-2"><span className="admin-label">缺省颜色统一为 {DEFAULT_TAG_COLOR}</span><input className="admin-input" value={optionForm.color} onChange={(e) => setOptionForm((s) => ({ ...s, color: e.target.value || DEFAULT_TAG_COLOR }))} placeholder={DEFAULT_TAG_COLOR} /></label>
@@ -609,7 +629,7 @@ export default function AdminPage() {
                     <p className="mt-1 text-xs text-[var(--muted)]">字段绑定：{group.boundField === "site_tag" ? "站点标签" : group.boundField === "featured_models" ? "主推模型" : "无"}</p>
                   </div>
                   <div className="flex gap-2">
-                    <button className="btn-glass" onClick={() => setGroupForm({ id: group.id, label: group.label, key: group.key, inputType: group.inputType, enabled: group.enabled, isFilterable: !!group.isFilterable, isComparable: !!group.isComparable, isVisibleByDefault: !!group.isVisibleByDefault, sortOrder: group.sortOrder || 0, boundField: group.boundField || "none" })}><Pencil className="h-4 w-4" />编辑</button>
+                    <button className="btn-glass" onClick={() => setGroupForm({ id: group.id, label: group.label, labelZh: group.labelZh || group.label, labelEn: group.labelEn || "", key: group.key, inputType: group.inputType, enabled: group.enabled, isFilterable: !!group.isFilterable, isComparable: !!group.isComparable, isVisibleByDefault: !!group.isVisibleByDefault, sortOrder: group.sortOrder || 0, boundField: group.boundField || "none" })}><Pencil className="h-4 w-4" />编辑</button>
                     <button className="btn-glass" onClick={() => removeGroup(group.id)}><Trash2 className="h-4 w-4" />删除</button>
                   </div>
                 </div>
@@ -633,7 +653,7 @@ export default function AdminPage() {
                       <span className="soft-tag" style={{ color: option.color || DEFAULT_TAG_COLOR, backgroundColor: `${(option.color || DEFAULT_TAG_COLOR)}1A`, borderColor: `${(option.color || DEFAULT_TAG_COLOR)}33` }}>{option.label}</span>
                       <span className="text-xs text-[var(--muted)]">{option.value}</span>
                       {option.color && <span className="text-xs text-[var(--muted)]">{option.color}</span>}
-                      <button className="text-[var(--muted)] hover:text-foreground" onClick={() => setOptionForm({ id: option.id, groupKey: option.groupKey, label: option.label, value: option.value, color: option.color || DEFAULT_TAG_COLOR, enabled: option.enabled, sortOrder: option.sortOrder || 0 })}><Pencil className="h-3.5 w-3.5" /></button>
+                      <button className="text-[var(--muted)] hover:text-foreground" onClick={() => setOptionForm({ id: option.id, groupKey: option.groupKey, label: option.label, labelZh: option.labelZh || option.label, labelEn: option.labelEn || "", value: option.value, color: option.color || DEFAULT_TAG_COLOR, enabled: option.enabled, sortOrder: option.sortOrder || 0 })}><Pencil className="h-3.5 w-3.5" /></button>
                       <button className="text-[var(--muted)] hover:text-rose-400" onClick={() => removeOption(option.id)}><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                   ))}
@@ -696,7 +716,8 @@ export default function AdminPage() {
               ) : (
                 <label className="space-y-2 md:col-span-2"><span className="admin-label">主推模型（逗号分隔）</span><textarea className="admin-input min-h-24" value={platformForm.modelsText} onChange={(e) => setPlatformForm((s) => ({ ...s, modelsText: e.target.value }))} /></label>
               )}
-              <label className="space-y-2 md:col-span-2"><span className="admin-label">描述</span><textarea className="admin-input min-h-24" value={platformForm.description} onChange={(e) => setPlatformForm((s) => ({ ...s, description: e.target.value }))} /></label>
+              <label className="space-y-2 md:col-span-2"><span className="admin-label">描述（中文）</span><textarea className="admin-input min-h-24" value={platformForm.descriptionZh} onChange={(e) => setPlatformForm((s) => ({ ...s, descriptionZh: e.target.value, description: e.target.value }))} /></label>
+              <label className="space-y-2 md:col-span-2"><span className="admin-label">描述（英文）</span><textarea className="admin-input min-h-24" value={platformForm.descriptionEn} onChange={(e) => setPlatformForm((s) => ({ ...s, descriptionEn: e.target.value }))} /></label>
               <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
                 <label className="flex items-center gap-2 rounded-xl border border-[var(--border-color)] px-3 py-2"><input type="checkbox" checked={platformForm.monitorEnabled} onChange={(e) => setPlatformForm((s) => ({ ...s, monitorEnabled: e.target.checked }))} /><span>启用监控</span></label>
                 <label className="space-y-2"><span className="admin-label">状态</span><select className="admin-input" value={platformForm.status} onChange={(e) => setPlatformForm((s) => ({ ...s, status: e.target.value }))}><option value="active">active</option><option value="archived">archived</option></select></label>

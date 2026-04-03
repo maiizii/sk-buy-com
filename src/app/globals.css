@@ -473,8 +473,12 @@ body::before {
 }
 
 .forum-category-card:hover,
-.forum-card-clickable:hover {
-  transform: translateY(-2px);
+.forum-card-clickable:hover,
+.home-featured-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-color));
+  box-shadow: var(--shadow-md);
+  background: color-mix(in srgb, var(--accent-soft) 22%, var(--card));
   box-shadow: var(--shadow-md);
   border-color: color-mix(in srgb, var(--accent) 30%, var(--border-color));
 }

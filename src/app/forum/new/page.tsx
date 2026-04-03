@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Send, Loader2, Tag } from "lucide-react";
+import { getMessages } from "@/lib/i18n";
 
 interface Category {
   id: string;
@@ -12,6 +13,7 @@ interface Category {
 }
 
 function NewTopicForm() {
+  const t = getMessages();
   const router = useRouter();
   const searchParams = useSearchParams();
   const defaultCategory = searchParams.get("category") || "";
@@ -80,7 +82,7 @@ function NewTopicForm() {
         setError(data.error);
       }
     } catch {
-      setError("发帖失败");
+      setError(t.forumPage.postFailed);
     } finally {
       setSubmitting(false);
     }
@@ -90,9 +92,9 @@ function NewTopicForm() {
     return (
       <main className="w-full py-12">
         <div className="forum-card p-8 text-center">
-          <p className="text-muted mb-4">请先登录后发帖</p>
+          <p className="text-muted mb-4">{t.forumPage.loginToPost}</p>
           <Link href="/" className="btn-glass btn-glass-primary">
-            返回首页登录
+            {t.forumPage.backHomeLogin}
           </Link>
         </div>
       </main>
@@ -112,26 +114,26 @@ function NewTopicForm() {
         className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground transition-colors"
       >
         <ArrowLeft className="w-3 h-3" />
-        返回论坛
+        {t.forumPage.backToForum}
       </Link>
 
-      <h1 className="text-lg font-bold font-mono">发布新帖</h1>
+      <h1 className="text-lg font-bold font-mono">{t.forumPage.publishTopic}</h1>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Category */}
         <div>
-          <label className="admin-label">选择板块 *</label>
+          <label className="admin-label">{t.forumPage.chooseCategory}</label>
           <select
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
             className="admin-input"
             required
           >
-            <option value="">请选择板块</option>
+            <option value="">{t.forumPage.chooseCategoryPlaceholder}</option>
             {availableCategories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
-                {c.readOnly ? " (官方)" : ""}
+                {c.readOnly ? t.forumPage.officialSuffix : ""}
               </option>
             ))}
           </select>
@@ -139,13 +141,13 @@ function NewTopicForm() {
 
         {/* Title */}
         <div>
-          <label className="admin-label">标题 *</label>
+          <label className="admin-label">{t.forumPage.titleLabel}</label>
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className="admin-input"
-            placeholder="帖子标题"
+            placeholder={t.forumPage.titlePlaceholder}
             maxLength={200}
             required
           />
@@ -153,19 +155,19 @@ function NewTopicForm() {
 
         {/* Content */}
         <div>
-          <label className="admin-label">内容 * （支持 Markdown）</label>
+          <label className="admin-label">{t.forumPage.contentLabel}</label>
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             className="admin-input min-h-[240px] resize-y"
-            placeholder="帖子内容，支持 Markdown 格式..."
+            placeholder={t.forumPage.contentPlaceholder}
             required
           />
         </div>
 
         {/* Tags */}
         <div>
-          <label className="admin-label">标签（可选）</label>
+          <label className="admin-label">{t.forumPage.tagsOptional}</label>
           <div className="flex gap-2 mb-2">
             <input
               type="text"
@@ -178,11 +180,11 @@ function NewTopicForm() {
                 }
               }}
               className="admin-input flex-1"
-              placeholder="输入标签后按回车添加"
+              placeholder={t.forumPage.tagPlaceholder}
             />
             <button type="button" onClick={addTag} className="btn-glass">
               <Tag className="w-3.5 h-3.5" />
-              添加
+              {t.forumPage.addTag}
             </button>
           </div>
           {tags.length > 0 && (
@@ -213,7 +215,7 @@ function NewTopicForm() {
         {/* Submit */}
         <div className="flex justify-end gap-3">
           <Link href="/forum" className="btn-glass">
-            取消
+            {t.common.cancel}
           </Link>
           <button
             type="submit"
@@ -225,7 +227,7 @@ function NewTopicForm() {
             ) : (
               <Send className="w-4 h-4" />
             )}
-            {submitting ? "发布中..." : "发布帖子"}
+            {submitting ? t.forumPage.submitPublishing : t.forumPage.submitTopic}
           </button>
         </div>
       </form>
@@ -234,11 +236,13 @@ function NewTopicForm() {
 }
 
 export default function NewTopicPage() {
+  const t = getMessages();
+
   return (
     <Suspense
       fallback={
         <main className="w-full py-12 text-center text-muted font-mono animate-pulse">
-          加载中...
+          {t.common.loading}
         </main>
       }
     >

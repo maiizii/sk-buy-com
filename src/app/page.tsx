@@ -73,7 +73,6 @@ interface PlatformConfigData {
   values: AttributeValue[];
 }
 
-const t = getMessages();
 const DEFAULT_TAG_COLOR = "#737373";
 
 function makeSoftTagStyle(color?: string) {
@@ -90,16 +89,16 @@ function logsToTrackerData(logs: ConnectivityLog[], nodeCount: number = 20): Tra
   const recentLogs = logs.slice(-nodeCount);
   const emptyCount = Math.max(0, nodeCount - recentLogs.length);
   return [
-    ...Array.from({ length: emptyCount }, () => ({ color: "bg-slate-300/80 dark:bg-slate-700/80", tooltip: "暂无数据" })),
+    ...Array.from({ length: emptyCount }, () => ({ color: "bg-slate-300/80 dark:bg-slate-700/80", tooltip: getMessages().common.noData })),
     ...recentLogs.map((log) => ({
       color: log.success ? (log.latency > 1500 ? "bg-amber-400" : "bg-emerald-500") : "bg-rose-500",
-      tooltip: log.success ? `${new Date(log.checkedAt + "Z").toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · ${log.latency}ms` : `${new Date(log.checkedAt + "Z").toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · ${log.errorMessage || "连接失败"}`,
+      tooltip: log.success ? `${new Date(log.checkedAt + "Z").toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · ${log.latency}ms` : `${new Date(log.checkedAt + "Z").toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · ${log.errorMessage || getMessages().common.connectionFailed}`,
     })),
   ];
 }
 
 function generateGreyTrackerData(nodeCount: number = 20): TrackerBlockProps[] {
-  return Array.from({ length: nodeCount }, () => ({ color: "bg-slate-200 dark:bg-slate-700/70", tooltip: "未启用连通监控" }));
+  return Array.from({ length: nodeCount }, () => ({ color: "bg-slate-200 dark:bg-slate-700/70", tooltip: getMessages().common.monitoringDisabled }));
 }
 
 function getBadgeClass(tag: Platform["tag"]) {
@@ -110,6 +109,7 @@ function getBadgeClass(tag: Platform["tag"]) {
 }
 
 export default function Home() {
+  const t = getMessages();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [config, setConfig] = useState<PlatformConfigData>({ groups: [], options: [], values: [] });
   const [connectivity, setConnectivity] = useState<ConnectivityData>({});
@@ -226,7 +226,7 @@ export default function Home() {
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link href="/admin" className="btn-glass">
-                查看后台字段规划
+                {t.home.viewAdminPlanning}
               </Link>
             </div>
           </div>
@@ -242,7 +242,7 @@ export default function Home() {
               />
             </label>
             <p className="mt-3 text-xs leading-6 text-[var(--muted)]">
-              支持先按关键词快速找站；如需按线路、模型、标签组合筛选，进入综合筛选页。
+              {t.home.quickHint}
             </p>
           </div>
         </div>
@@ -253,12 +253,12 @@ export default function Home() {
           <div>
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-[var(--accent-strong)]" />
-              <h3 className="text-base font-semibold">首页精选平台</h3>
+              <h3 className="text-base font-semibold">{t.home.featuredTitle}</h3>
             </div>
-            <p className="mt-1 text-sm text-[var(--muted)]">首页仅展示紧凑概览，完整筛选与比对请前往综合筛选。</p>
+            <p className="mt-1 text-sm text-[var(--muted)]">{t.home.featuredDescription}</p>
           </div>
           <Link href="/discover" className="btn-glass">
-            进入综合筛选
+            {t.home.enterDiscover}
             <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
@@ -284,7 +284,7 @@ export default function Home() {
                 : generateGreyTrackerData(20);
 
               return (
-                <article key={platform.id} className="flex h-full flex-col rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-5 shadow-sm">
+                <article key={platform.id} className="home-featured-card flex h-full flex-col rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-5 shadow-sm transition-all duration-200">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h4 className="truncate text-base font-semibold">{platform.name}</h4>
@@ -313,18 +313,18 @@ export default function Home() {
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-semibold text-[var(--accent-strong)]">{effectiveUptime}%</span>
-                        <span className="text-[var(--muted)]">连通率</span>
+                        <span className="text-[var(--muted)]">{t.home.uptime}</span>
                       </div>
                       <Tracker data={trackerData} className="h-4" hoverEffect={!!platform.monitorEnabled} />
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <a href={`https://${platform.url}`} target="_blank" rel="noreferrer" className="btn-glass">
                         <ExternalLink className="h-3.5 w-3.5" />
-                        访问
+                        {t.common.visit}
                       </a>
                       <Link href={`/forum/tag/${platform.id}`} className="btn-glass">
                         <MessageSquare className="h-3.5 w-3.5" />
-                        点评
+                        {t.common.review}
                       </Link>
                     </div>
                   </div>

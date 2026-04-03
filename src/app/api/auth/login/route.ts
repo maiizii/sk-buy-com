@@ -23,6 +23,13 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!user.emailVerified) {
+      return NextResponse.json(
+        { success: false, error: "邮箱尚未验证，请先前往邮件中点击验证链接" },
+        { status: 403, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     const token = createSession(user.id);
     const response = NextResponse.json(
       {

@@ -15,6 +15,13 @@ const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+function ensureColumn(tableName: string, columnName: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,6 +31,8 @@ db.exec(`
     passwordHash TEXT NOT NULL,
     role TEXT DEFAULT 'user' CHECK(role IN ('user', 'admin')),
     avatar TEXT DEFAULT '',
+    emailVerified INTEGER DEFAULT 0,
+    emailVerifiedAt TEXT,
     createdAt TEXT DEFAULT (datetime('now')),
     updatedAt TEXT DEFAULT (datetime('now'))
   );
@@ -45,6 +54,18 @@ db.exec(`
     userId INTEGER NOT NULL,
     token TEXT UNIQUE NOT NULL,
     expiresAt TEXT NOT NULL,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS email_verification_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    code TEXT,
+    expiresAt TEXT NOT NULL,
+    consumedAt TEXT,
+    codeConsumedAt TEXT,
+    createdAt TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
   );
 
@@ -93,6 +114,7 @@ db.exec(`
     color TEXT DEFAULT '',
     enabled INTEGER DEFAULT 1,
     sortOrder INTEGER DEFAULT 0,
+    metaJson TEXT DEFAULT '{}',
     createdAt TEXT DEFAULT (datetime('now')),
     updatedAt TEXT DEFAULT (datetime('now')),
     UNIQUE(groupKey, value)
@@ -231,6 +253,8 @@ db.exec(`
   );
 `);
 
+ensureColumn("platform_attribute_options", "metaJson", "TEXT DEFAULT '{}' ");
+
 function hasColumn(tableName: string, columnName: string) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
   return columns.some((column) => column.name === columnName);
@@ -239,10 +263,29 @@ function hasColumn(tableName: string, columnName: string) {
 if (!hasColumn("users", "displayName")) {
   db.exec(`ALTER TABLE users ADD COLUMN displayName TEXT DEFAULT ''`);
 }
+if (!hasColumn("users", "emailVerified")) {
+  db.exec(`ALTER TABLE users ADD COLUMN emailVerified INTEGER DEFAULT 0`);
+}
+if (!hasColumn("users", "emailVerifiedAt")) {
+  db.exec(`ALTER TABLE users ADD COLUMN emailVerifiedAt TEXT`);
+}
 if (!hasColumn("users", "updatedAt")) {
   db.exec(`ALTER TABLE users ADD COLUMN updatedAt TEXT`);
   db.exec(`UPDATE users SET updatedAt = COALESCE(createdAt, datetime('now')) WHERE updatedAt IS NULL OR updatedAt = ''`);
 }
+if (!hasColumn("email_verification_tokens", "code")) {
+  db.exec(`ALTER TABLE email_verification_tokens ADD COLUMN code TEXT`);
+}
+if (!hasColumn("email_verification_tokens", "codeConsumedAt")) {
+  db.exec(`ALTER TABLE email_verification_tokens ADD COLUMN codeConsumedAt TEXT`);
+}
+db.exec(`
+  UPDATE users
+  SET emailVerified = 1,
+      emailVerifiedAt = COALESCE(emailVerifiedAt, createdAt, datetime('now')),
+      updatedAt = datetime('now')
+  WHERE role = 'admin'
+`);
 try { db.exec(`ALTER TABLE platforms ADD COLUMN baseUrl TEXT DEFAULT ''`); } catch {}
 if (!hasColumn("platform_attribute_options", "color")) {
   db.exec(`ALTER TABLE platform_attribute_options ADD COLUMN color TEXT DEFAULT ''`);
@@ -252,6 +295,8 @@ try { db.exec(`ALTER TABLE platforms ADD COLUMN status TEXT DEFAULT 'active'`); 
 try { db.exec(`ALTER TABLE platforms ADD COLUMN metaJson TEXT DEFAULT '{}'`); } catch {}
 try { db.exec(`ALTER TABLE platform_attribute_groups ADD COLUMN metaJson TEXT DEFAULT '{}'`); } catch {}
 
+db.exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token ON email_verification_tokens(token)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user ON email_verification_tokens(userId, expiresAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_connectivity_logs_platform_time ON connectivity_logs(platformId, checkedAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_topics_category ON forum_topics(categoryId, createdAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_replies_topic ON forum_replies(topicId, createdAt ASC)`);
@@ -278,12 +323,31 @@ export interface User {
   displayName: string;
   role: "user" | "admin";
   avatar: string;
+  emailVerified: boolean;
+  emailVerifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-interface UserRow extends User {
+interface UserRow {
+  id: number;
+  username: string;
+  email: string;
+  displayName: string;
+  role: "user" | "admin";
+  avatar: string;
+  emailVerified: number;
+  emailVerifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
   passwordHash: string;
+}
+
+function rowToUser(row: Omit<UserRow, "passwordHash">): User {
+  return {
+    ...row,
+    emailVerified: row.emailVerified === 1,
+  };
 }
 
 function normalizeEmail(email: string) {
@@ -306,17 +370,22 @@ export function createUser(data: {
   role?: "user" | "admin";
   displayName?: string;
   username?: string;
+  emailVerified?: boolean;
 }): User {
   const passwordHash = hashPassword(data.password);
   const email = normalizeEmail(data.email);
   const username = data.username?.trim() || generateUsernameFromEmail(email);
   const displayName = data.displayName?.trim() || username;
   const role = data.role || "user";
+  const emailVerified = data.emailVerified === true;
+  const emailVerifiedAt = emailVerified
+    ? new Date().toISOString().slice(0, 19).replace("T", " ")
+    : null;
   const result = db
     .prepare(
-      `INSERT INTO users (username, email, displayName, passwordHash, role, updatedAt) VALUES (?, ?, ?, ?, ?, datetime('now'))`
+      `INSERT INTO users (username, email, displayName, passwordHash, role, emailVerified, emailVerifiedAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     )
-    .run(username, email, displayName, passwordHash, role);
+    .run(username, email, displayName, passwordHash, role, emailVerified ? 1 : 0, emailVerifiedAt);
 
   const user = getUserById(result.lastInsertRowid as number)!;
   db.prepare(
@@ -327,9 +396,11 @@ export function createUser(data: {
 
 export function getUserById(id: number): User | null {
   const row = db
-    .prepare(`SELECT id, username, email, displayName, role, avatar, createdAt, updatedAt FROM users WHERE id = ?`)
-    .get(id) as User | undefined;
-  return row || null;
+    .prepare(
+      `SELECT id, username, email, displayName, role, avatar, emailVerified, emailVerifiedAt, createdAt, updatedAt FROM users WHERE id = ?`
+    )
+    .get(id) as Omit<UserRow, "passwordHash"> | undefined;
+  return row ? rowToUser(row) : null;
 }
 
 export function getUserByUsername(username: string): UserRow | null {
@@ -343,9 +414,12 @@ export function getUserByEmail(email: string): UserRow | null {
 }
 
 export function getAllUsers(): User[] {
-  return db
-    .prepare(`SELECT id, username, email, displayName, role, avatar, createdAt, updatedAt FROM users ORDER BY createdAt DESC`)
-    .all() as User[];
+  const rows = db
+    .prepare(
+      `SELECT id, username, email, displayName, role, avatar, emailVerified, emailVerifiedAt, createdAt, updatedAt FROM users ORDER BY createdAt DESC`
+    )
+    .all() as Array<Omit<UserRow, "passwordHash">>;
+  return rows.map(rowToUser);
 }
 
 export function updateUserRole(id: number, role: "user" | "admin"): void {
@@ -365,14 +439,14 @@ export function createSession(userId: number): string {
 export function getUserBySessionToken(token: string): User | null {
   const row = db
     .prepare(
-      `SELECT u.id, u.username, u.email, u.displayName, u.role, u.avatar, u.createdAt,
-              COALESCE(u.updatedAt, u.createdAt) as updatedAt
+      `SELECT u.id, u.username, u.email, u.displayName, u.role, u.avatar, u.emailVerified,
+              u.emailVerifiedAt, u.createdAt, COALESCE(u.updatedAt, u.createdAt) as updatedAt
        FROM sessions s
        JOIN users u ON s.userId = u.id
        WHERE s.token = ? AND datetime(s.expiresAt) > datetime('now')`
     )
-    .get(token) as User | undefined;
-  return row || null;
+    .get(token) as Omit<UserRow, "passwordHash"> | undefined;
+  return row ? rowToUser(row) : null;
 }
 
 export function deleteSession(token: string): void {
@@ -381,6 +455,98 @@ export function deleteSession(token: string): void {
 
 export function cleanExpiredSessions(): void {
   db.prepare(`DELETE FROM sessions WHERE datetime(expiresAt) <= datetime('now')`).run();
+}
+
+export interface EmailVerificationChallenge {
+  token: string;
+  code: string;
+  expiresAt: string;
+}
+
+function generateEmailVerificationCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+export function createEmailVerificationChallenge(userId: number, ttlHours: number = 24): EmailVerificationChallenge {
+  db.prepare(`DELETE FROM email_verification_tokens WHERE userId = ?`).run(userId);
+  const token = crypto.randomBytes(32).toString("hex");
+  const code = generateEmailVerificationCode();
+  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
+
+  db.prepare(`INSERT INTO email_verification_tokens (userId, token, code, expiresAt) VALUES (?, ?, ?, ?)`)
+    .run(userId, token, code, expiresAt);
+
+  return { token, code, expiresAt };
+}
+
+export function createEmailVerificationToken(userId: number, ttlHours: number = 24): string {
+  return createEmailVerificationChallenge(userId, ttlHours).token;
+}
+
+export function markUserEmailVerified(userId: number): User | null {
+  db.prepare(
+    `UPDATE users
+     SET emailVerified = 1,
+         emailVerifiedAt = COALESCE(emailVerifiedAt, datetime('now')),
+         updatedAt = datetime('now')
+     WHERE id = ?`
+  ).run(userId);
+  return getUserById(userId);
+}
+
+export function consumeEmailVerificationToken(token: string): User | null {
+  const row = db
+    .prepare(
+      `SELECT id, userId
+       FROM email_verification_tokens
+       WHERE token = ? AND consumedAt IS NULL AND datetime(expiresAt) > datetime('now')`
+    )
+    .get(token) as { id: number; userId: number } | undefined;
+
+  if (!row) return null;
+
+  db.prepare(
+    `UPDATE email_verification_tokens
+     SET consumedAt = datetime('now'),
+         codeConsumedAt = COALESCE(codeConsumedAt, datetime('now'))
+     WHERE id = ?`
+  ).run(row.id);
+  return markUserEmailVerified(row.userId);
+}
+
+export function verifyEmailByCode(email: string, code: string): User | null {
+  const user = getUserByEmail(email);
+  if (!user) return null;
+
+  const normalizedCode = code.trim();
+  if (!/^\d{6}$/.test(normalizedCode)) return null;
+
+  const row = db
+    .prepare(
+      `SELECT id
+       FROM email_verification_tokens
+       WHERE userId = ?
+         AND code = ?
+         AND consumedAt IS NULL
+         AND datetime(expiresAt) > datetime('now')
+       ORDER BY createdAt DESC
+       LIMIT 1`
+    )
+    .get(user.id, normalizedCode) as { id: number } | undefined;
+
+  if (!row) return null;
+
+  db.prepare(
+    `UPDATE email_verification_tokens
+     SET consumedAt = datetime('now'),
+         codeConsumedAt = datetime('now')
+     WHERE id = ?`
+  ).run(row.id);
+
+  return markUserEmailVerified(user.id);
 }
 
 export interface Platform {
@@ -398,6 +564,8 @@ export interface Platform {
   latency: number;
   joinDate: string;
   description: string;
+  descriptionZh: string;
+  descriptionEn: string;
   sortOrder: number;
   status: string;
   metaJson: string;
@@ -428,11 +596,17 @@ interface PlatformRow {
 }
 
 function rowToPlatform(row: PlatformRow): Platform {
+  const meta = JSON.parse(row.metaJson || "{}") as { descriptionZh?: string; descriptionEn?: string };
+  const descriptionZh = (meta.descriptionZh || row.description || "").trim();
+  const descriptionEn = (meta.descriptionEn || "").trim();
   return {
     ...row,
     tag: row.tag as Platform["tag"],
     monitorEnabled: row.monitorEnabled === 1,
     models: JSON.parse(row.models || "[]"),
+    description: descriptionZh || descriptionEn || row.description,
+    descriptionZh,
+    descriptionEn,
   };
 }
 
@@ -446,7 +620,14 @@ export function getPlatformById(id: string): Platform | null {
   return row ? rowToPlatform(row) : null;
 }
 
-export function createPlatform(data: Omit<Platform, "createdAt" | "updatedAt" | "status" | "metaJson"> & { status?: string; metaJson?: string }): Platform {
+export function createPlatform(
+  data: Omit<Platform, "createdAt" | "updatedAt" | "status" | "metaJson" | "descriptionZh" | "descriptionEn"> & {
+    status?: string;
+    metaJson?: string;
+    descriptionZh?: string;
+    descriptionEn?: string;
+  }
+): Platform {
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO platforms (id, name, url, baseUrl, monitorEnabled, tag, tagLabel, billingRate, billingColor, models, uptime, latency, joinDate, description, sortOrder, status, metaJson, createdAt, updatedAt)
@@ -519,6 +700,8 @@ export interface PlatformAttributeGroupRecord {
   id: string;
   key: string;
   label: string;
+  labelZh: string;
+  labelEn: string;
   inputType: string;
   enabled: boolean;
   isFilterable: boolean;
@@ -533,6 +716,8 @@ export interface PlatformAttributeOptionRecord {
   groupKey: string;
   value: string;
   label: string;
+  labelZh: string;
+  labelEn: string;
   color: string;
   enabled: boolean;
   sortOrder: number;
@@ -577,11 +762,19 @@ function rowToPlatformAttributeGroup(row: {
   sortOrder: number;
   metaJson?: string;
 }): PlatformAttributeGroupRecord {
-  const meta = JSON.parse(row.metaJson || "{}") as { boundField?: "none" | "site_tag" | "featured_models" };
+  const meta = JSON.parse(row.metaJson || "{}") as {
+    boundField?: "none" | "site_tag" | "featured_models";
+    labelZh?: string;
+    labelEn?: string;
+  };
+  const labelZh = (meta.labelZh || row.label || "").trim();
+  const labelEn = (meta.labelEn || "").trim();
   return {
     id: row.id,
     key: row.key,
-    label: row.label,
+    label: labelZh || labelEn || row.label,
+    labelZh,
+    labelEn,
     inputType: row.inputType,
     enabled: row.enabled === 1,
     isFilterable: row.isFilterable === 1,
@@ -600,9 +793,16 @@ function rowToPlatformAttributeOption(row: {
   color: string;
   enabled: number;
   sortOrder: number;
+  metaJson?: string;
 }): PlatformAttributeOptionRecord {
+  const meta = JSON.parse(row.metaJson || "{}") as { labelZh?: string; labelEn?: string };
+  const labelZh = (meta.labelZh || row.label || "").trim();
+  const labelEn = (meta.labelEn || "").trim();
   return {
     ...row,
+    label: labelZh || labelEn || row.label,
+    labelZh,
+    labelEn,
     enabled: row.enabled === 1,
   };
 }
@@ -642,6 +842,8 @@ export function getPlatformAttributeGroups(): PlatformAttributeGroupRecord[] {
 
 export function createPlatformAttributeGroup(data: {
   label: string;
+  labelZh?: string;
+  labelEn?: string;
   key?: string;
   inputType: string;
   enabled?: boolean;
@@ -652,21 +854,26 @@ export function createPlatformAttributeGroup(data: {
   boundField?: "none" | "site_tag" | "featured_models";
 }): PlatformAttributeGroupRecord {
   const id = `group_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-  const key = slugifyKey(data.key || data.label);
+  const primaryLabel = (data.labelZh || data.label || data.labelEn || "").trim();
+  const key = slugifyKey(data.key || primaryLabel);
   db.prepare(
     `INSERT INTO platform_attribute_groups (id, key, label, inputType, enabled, isFilterable, isComparable, isVisibleByDefault, sortOrder, metaJson)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     key,
-    data.label.trim(),
+    primaryLabel,
     data.inputType,
     data.enabled === false ? 0 : 1,
     data.isFilterable === false ? 0 : 1,
     data.isComparable === false ? 0 : 1,
     data.isVisibleByDefault ? 1 : 0,
     data.sortOrder || 0,
-    JSON.stringify({ boundField: data.boundField || "none" })
+    JSON.stringify({
+      boundField: data.boundField || "none",
+      labelZh: (data.labelZh || data.label || "").trim(),
+      labelEn: (data.labelEn || "").trim(),
+    })
   );
   return getPlatformAttributeGroups().find((group) => group.id === id)!;
 }
@@ -675,6 +882,8 @@ export function updatePlatformAttributeGroup(
   id: string,
   data: Partial<{
     label: string;
+    labelZh: string;
+    labelEn: string;
     key: string;
     inputType: string;
     enabled: boolean;
@@ -691,8 +900,10 @@ export function updatePlatformAttributeGroup(
     ...existing,
     ...data,
     key: data.key ? slugifyKey(data.key) : existing.key,
-    label: data.label?.trim() || existing.label,
+    labelZh: data.labelZh?.trim() || data.label?.trim() || existing.labelZh,
+    labelEn: data.labelEn?.trim() || existing.labelEn,
   };
+  updated.label = updated.labelZh || updated.labelEn || existing.label;
   db.prepare(
     `UPDATE platform_attribute_groups SET key = ?, label = ?, inputType = ?, enabled = ?, isFilterable = ?, isComparable = ?, isVisibleByDefault = ?, sortOrder = ?, metaJson = ?, updatedAt = datetime('now') WHERE id = ?`
   ).run(
@@ -704,7 +915,11 @@ export function updatePlatformAttributeGroup(
     updated.isComparable ? 1 : 0,
     updated.isVisibleByDefault ? 1 : 0,
     updated.sortOrder,
-    JSON.stringify({ boundField: updated.boundField || "none" }),
+    JSON.stringify({
+      boundField: updated.boundField || "none",
+      labelZh: updated.labelZh,
+      labelEn: updated.labelEn,
+    }),
     id
   );
   return getPlatformAttributeGroups().find((group) => group.id === id) || null;
@@ -731,23 +946,39 @@ export function getPlatformAttributeOptions(): PlatformAttributeOptionRecord[] {
       color: string;
       enabled: number;
       sortOrder: number;
+      metaJson?: string;
     }));
 }
 
 export function createPlatformAttributeOption(data: {
   groupKey: string;
   label: string;
+  labelZh?: string;
+  labelEn?: string;
   value?: string;
   color?: string;
   enabled?: boolean;
   sortOrder?: number;
 }): PlatformAttributeOptionRecord {
   const id = `option_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-  const value = slugifyKey(data.value || data.label);
+  const primaryLabel = (data.labelZh || data.label || data.labelEn || "").trim();
+  const value = slugifyKey(data.value || primaryLabel);
   db.prepare(
-    `INSERT INTO platform_attribute_options (id, groupKey, value, label, color, enabled, sortOrder)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, data.groupKey, value, data.label.trim(), (data.color || "").trim(), data.enabled === false ? 0 : 1, data.sortOrder || 0);
+    `INSERT INTO platform_attribute_options (id, groupKey, value, label, color, enabled, sortOrder, metaJson)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    data.groupKey,
+    value,
+    primaryLabel,
+    (data.color || "").trim(),
+    data.enabled === false ? 0 : 1,
+    data.sortOrder || 0,
+    JSON.stringify({
+      labelZh: (data.labelZh || data.label || "").trim(),
+      labelEn: (data.labelEn || "").trim(),
+    })
+  );
   return getPlatformAttributeOptions().find((option) => option.id === id)!;
 }
 
@@ -756,6 +987,8 @@ export function updatePlatformAttributeOption(
   data: Partial<{
     groupKey: string;
     label: string;
+    labelZh: string;
+    labelEn: string;
     value: string;
     color: string;
     enabled: boolean;
@@ -768,11 +1001,25 @@ export function updatePlatformAttributeOption(
     ...existing,
     ...data,
     value: data.value ? slugifyKey(data.value) : existing.value,
-    label: data.label?.trim() || existing.label,
+    labelZh: data.labelZh?.trim() || data.label?.trim() || existing.labelZh,
+    labelEn: data.labelEn?.trim() || existing.labelEn,
   };
+  updated.label = updated.labelZh || updated.labelEn || existing.label;
   db.prepare(
-    `UPDATE platform_attribute_options SET groupKey = ?, value = ?, label = ?, color = ?, enabled = ?, sortOrder = ?, updatedAt = datetime('now') WHERE id = ?`
-  ).run(updated.groupKey, updated.value, updated.label, (updated.color || "").trim(), updated.enabled ? 1 : 0, updated.sortOrder, id);
+    `UPDATE platform_attribute_options SET groupKey = ?, value = ?, label = ?, color = ?, enabled = ?, sortOrder = ?, metaJson = ?, updatedAt = datetime('now') WHERE id = ?`
+  ).run(
+    updated.groupKey,
+    updated.value,
+    updated.label,
+    (updated.color || "").trim(),
+    updated.enabled ? 1 : 0,
+    updated.sortOrder,
+    JSON.stringify({
+      labelZh: updated.labelZh,
+      labelEn: updated.labelEn,
+    }),
+    id
+  );
   return getPlatformAttributeOptions().find((option) => option.id === id) || null;
 }
 
@@ -962,11 +1209,11 @@ function seedPlatformConfig() {
   const optionCount = (db.prepare(`SELECT COUNT(*) as count FROM platform_attribute_options`).get() as { count: number }).count;
   if (optionCount === 0) {
     const stmt = db.prepare(
-      `INSERT INTO platform_attribute_options (id, groupKey, value, label, color, enabled, sortOrder)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO platform_attribute_options (id, groupKey, value, label, color, enabled, sortOrder, metaJson)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const option of platformAttributeOptionsSeed) {
-      stmt.run(option.id, option.groupKey, option.value, option.label, option.color || "", option.enabled ? 1 : 0, option.sortOrder);
+      stmt.run(option.id, option.groupKey, option.value, option.label, option.color || "", option.enabled ? 1 : 0, option.sortOrder, JSON.stringify({ labelZh: option.label, labelEn: "" }));
     }
   }
 
@@ -1002,9 +1249,11 @@ function seedData() {
         latency: 345,
         joinDate: "2024-03-15",
         description: "高品质 API 中转服务，稳定性极佳",
+        descriptionZh: "高品质 API 中转服务，稳定性极佳",
+        descriptionEn: "High-quality API relay service with excellent stability.",
         sortOrder: 1,
         status: "active",
-        metaJson: "{}",
+        metaJson: JSON.stringify({ descriptionZh: "高品质 API 中转服务，稳定性极佳", descriptionEn: "High-quality API relay service with excellent stability." }),
       },
       {
         id: "freegpt-hub",
@@ -1021,9 +1270,11 @@ function seedData() {
         latency: 1200,
         joinDate: "2024-08-22",
         description: "免费公益站，不保证稳定性",
+        descriptionZh: "免费公益站，不保证稳定性",
+        descriptionEn: "Free public platform with no stability guarantee.",
         sortOrder: 2,
         status: "active",
-        metaJson: "{}",
+        metaJson: JSON.stringify({ descriptionZh: "免费公益站，不保证稳定性", descriptionEn: "Free public platform with no stability guarantee." }),
       },
       {
         id: "siliconflow",
@@ -1040,9 +1291,11 @@ function seedData() {
         latency: 580,
         joinDate: "2024-06-10",
         description: "国产模型聚合，性价比优秀",
+        descriptionZh: "国产模型聚合，性价比优秀",
+        descriptionEn: "Great-value aggregation platform focused on domestic models.",
         sortOrder: 3,
         status: "active",
-        metaJson: "{}",
+        metaJson: JSON.stringify({ descriptionZh: "国产模型聚合，性价比优秀", descriptionEn: "Great-value aggregation platform focused on domestic models." }),
       },
       {
         id: "gpt-proxy-xyz",
@@ -1059,9 +1312,11 @@ function seedData() {
         latency: 3500,
         joinDate: "2024-01-05",
         description: "服务已不可用，疑似跑路",
+        descriptionZh: "服务已不可用，疑似跑路",
+        descriptionEn: "Service appears unavailable and likely abandoned.",
         sortOrder: 4,
         status: "archived",
-        metaJson: "{}",
+        metaJson: JSON.stringify({ descriptionZh: "服务已不可用，疑似跑路", descriptionEn: "Service appears unavailable and likely abandoned." }),
       },
     ];
 
@@ -1098,6 +1353,7 @@ function seedData() {
       role: "admin",
       displayName: adminDisplayName,
       username: "admin",
+      emailVerified: true,
     });
     console.log(`[DB] Created default admin user: ${adminEmail}`);
   }
