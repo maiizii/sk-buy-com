@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { Navbar } from "@/components/Navbar";
 import { AppFooter } from "@/components/AppFooter";
@@ -38,7 +39,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-background text-foreground font-sans antialiased">
-        <Navbar />
+        <Suspense fallback={null}>
+          <Navbar />
+        </Suspense>
         <main className="min-w-0 w-full px-4 pt-24 sm:px-6 lg:w-[calc(100%-192px)] lg:ml-[192px] lg:px-8 lg:pt-8">
           <div className="flex min-h-[calc(100vh-96px)] flex-col">
             <div className="flex-1 pb-8">{children}</div>
