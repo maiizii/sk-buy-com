@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeftRight, ExternalLink, Search, Sparkles } from "lucide-react";
@@ -33,7 +33,7 @@ function formatDateText(value?: string | null) {
   return value;
 }
 
-export default function ComparePage() {
+function ComparePageContent() {
   const searchParams = useSearchParams();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [connectivity, setConnectivity] = useState<ConnectivityData>({});
@@ -382,5 +382,41 @@ export default function ComparePage() {
         )}
       </section>
     </div>
+  );
+}
+
+function ComparePageFallback() {
+  return (
+    <div className="space-y-6">
+      <section className="shell-panel overflow-hidden bg-gradient-to-br from-[var(--card)] via-[var(--card)] to-[var(--accent-soft)]/25">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent-strong)]">
+              {t.discoverPage.compareBadge}
+            </div>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{t.discoverPage.compareTitle}</h2>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--muted)] sm:text-base">{t.discoverPage.compareDescription}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/discover" className="btn-glass">
+              <Search className="h-4 w-4" />
+              {t.discoverPage.backToDiscover}
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="admin-card overflow-hidden">
+        <div className="px-6 py-20 text-center text-sm text-[var(--muted)]">{t.common.loading}</div>
+      </section>
+    </div>
+  );
+}
+
+export default function ComparePage() {
+  return (
+    <Suspense fallback={<ComparePageFallback />}>
+      <ComparePageContent />
+    </Suspense>
   );
 }
