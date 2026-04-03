@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ExternalLink, MessageSquare, Search, Sparkles } from "lucide-react";
+import { ArrowRight, ChevronDown, ExternalLink, MessageSquare, Search, Sparkles } from "lucide-react";
 import { Tracker, type TrackerBlockProps } from "@/components/Tracker";
 import { getMessages } from "@/lib/i18n";
 
@@ -115,6 +115,7 @@ export default function Home() {
   const [connectivity, setConnectivity] = useState<ConnectivityData>({});
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState("");
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     Promise.all([fetch("/api/platforms"), fetch("/api/platforms/config")])
@@ -186,12 +187,33 @@ export default function Home() {
   };
 
   const getFeaturedModels = (platform: Platform) => {
-    if (!featuredModelsGroup) return platform.models;
+    if (!featuredModelsGroup) {
+      return platform.models.map((model) => ({
+        key: model,
+        label: model,
+        color: undefined as string | undefined,
+      }));
+    }
+
     const values = config.values.filter((item) => item.platformId === platform.id && item.groupKey === featuredModelsGroup.key);
-    const labels = values
-      .map((item) => optionMap[`${item.groupKey}:${item.optionValue}`]?.label || item.optionValue)
-      .filter(Boolean);
-    return labels.length > 0 ? labels : platform.models;
+    const models = values
+      .map((item) => {
+        const option = optionMap[`${item.groupKey}:${item.optionValue}`];
+        return {
+          key: `${item.groupKey}:${item.optionValue}`,
+          label: option?.label || item.optionValue,
+          color: option?.color,
+        };
+      })
+      .filter((item) => item.label);
+
+    return models.length > 0
+      ? models
+      : platform.models.map((model) => ({
+          key: model,
+          label: model,
+          color: undefined as string | undefined,
+        }));
   };
 
   const filteredPlatforms = useMemo(() => {
@@ -263,7 +285,7 @@ export default function Home() {
           </Link>
         </div>
 
-        <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid items-start gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
           {loading ? (
             <div className="col-span-full py-10 text-center text-sm text-[var(--muted)]">{t.common.loading}</div>
           ) : filteredPlatforms.length === 0 ? (
@@ -279,37 +301,55 @@ export default function Home() {
               const effectiveUptime = connData?.summary.totalChecks ? connData.summary.uptime : (platform.uptime || 0);
               const trackerData = platform.monitorEnabled
                 ? connData
-                  ? logsToTrackerData(connData.logs, 20)
-                  : logsToTrackerData([], 20)
-                : generateGreyTrackerData(20);
+                  ? logsToTrackerData(connData.logs, 24)
+                  : logsToTrackerData([], 24)
+                : generateGreyTrackerData(24);
+              const expanded = !!expandedCards[platform.id];
 
               return (
-                <article key={platform.id} className="home-featured-card flex h-full flex-col rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-5 shadow-sm transition-all duration-200">
+                <article
+                  key={platform.id}
+                  className="home-featured-card flex h-auto cursor-pointer flex-col rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-5 shadow-sm transition-all duration-200"
+                  onClick={() => setExpandedCards((prev) => ({ ...prev, [platform.id]: !prev[platform.id] }))}
+                  aria-expanded={expanded}
+                >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h4 className="truncate text-base font-semibold">{platform.name}</h4>
-                      <p className="mt-1 truncate text-xs text-[var(--muted)]">{platform.url}</p>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-2">
-                      <span className={getBadgeClass(platform.tag)} style={makeBadgeStyle(siteTagOption?.color)}>{siteTagOption?.label || platform.tagLabel}</span>
-                      <span className={`text-sm font-semibold ${platform.billingColor}`}>{platform.billingRate}</span>
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <p className="line-clamp-2 text-sm leading-6 text-[var(--muted)]">{platform.description}</p>
-                    <div className="mt-4 flex min-h-[32px] flex-wrap content-start gap-1.5">
-                      {featuredModels.map((model) => (
-                        <span key={model} className="soft-tag">{model}</span>
-                      ))}
-                    </div>
-                    <div className="mt-2 flex min-h-[24px] flex-wrap content-start gap-1.5 pr-2">
-                      {visibleTags.map((tag) => (
-                        <span key={tag.key} className="soft-tag" style={makeSoftTagStyle(tag.color)}>{tag.label}</span>
-                      ))}
-                      {hiddenTagCount > 0 && <span className="soft-tag soft-tag-muted">…</span>}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex items-center gap-2">
+                          <h4 className="truncate text-base font-semibold">{platform.name}</h4>
+                          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--card)]/80 text-[var(--muted)]">
+                            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                          </span>
+                        </div>
+                        <span className={`${getBadgeClass(platform.tag)} shrink-0`} style={makeBadgeStyle(siteTagOption?.color)}>{siteTagOption?.label || platform.tagLabel}</span>
+                      </div>
+                      {expanded ? <p className="mt-1 truncate text-xs text-[var(--muted)]">{platform.url}</p> : null}
                     </div>
                   </div>
-                  <div className="mt-auto pt-4 flex items-end gap-3">
+
+                  <div className="mt-3 flex items-start justify-between gap-3">
+                    <p className={`min-w-0 flex-1 text-sm leading-6 text-[var(--muted)] ${expanded ? "line-clamp-2" : "line-clamp-1"}`}>{platform.description}</p>
+                    <span className={`shrink-0 text-sm font-semibold ${platform.billingColor}`}>{platform.billingRate}</span>
+                  </div>
+
+                  {expanded ? (
+                    <div className="mt-4">
+                      <div className="flex min-h-[32px] flex-wrap content-start gap-1.5">
+                        {featuredModels.map((model) => (
+                          <span key={model.key} className="soft-tag" style={makeSoftTagStyle(model.color)}>{model.label}</span>
+                        ))}
+                      </div>
+                      <div className="mt-2 flex min-h-[24px] flex-wrap content-start gap-1.5 pr-2">
+                        {visibleTags.map((tag) => (
+                          <span key={tag.key} className="soft-tag" style={makeSoftTagStyle(tag.color)}>{tag.label}</span>
+                        ))}
+                        {hiddenTagCount > 0 && <span className="soft-tag soft-tag-muted">…</span>}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className={`mt-auto flex flex-wrap items-end gap-3 ${expanded ? "pt-4" : "pt-5"}`}>
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-semibold text-[var(--accent-strong)]">{effectiveUptime}%</span>
@@ -318,11 +358,17 @@ export default function Home() {
                       <Tracker data={trackerData} className="h-4" hoverEffect={!!platform.monitorEnabled} />
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <a href={`https://${platform.url}`} target="_blank" rel="noreferrer" className="btn-glass">
+                      <a
+                        href={`https://${platform.url}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-glass"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <ExternalLink className="h-3.5 w-3.5" />
                         {t.common.visit}
                       </a>
-                      <Link href={`/forum/tag/${platform.id}`} className="btn-glass">
+                      <Link href={`/forum/tag/${platform.id}`} className="btn-glass" onClick={(e) => e.stopPropagation()}>
                         <MessageSquare className="h-3.5 w-3.5" />
                         {t.common.review}
                       </Link>

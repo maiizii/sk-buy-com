@@ -1,105 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { ExternalLink, Gauge, Settings2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowRightLeft, ExternalLink, Gauge, Settings2 } from "lucide-react";
 import { Tracker, type TrackerBlockProps } from "@/components/Tracker";
 import { getMessages } from "@/lib/i18n";
-
-interface Platform {
-  id: string;
-  name: string;
-  url: string;
-  baseUrl: string;
-  monitorEnabled: boolean;
-  tag: "premium" | "free" | "stable" | "dead";
-  tagLabel: string;
-  billingRate: string;
-  billingColor: string;
-  models: string[];
-  uptime: number;
-  latency: number;
-  joinDate: string;
-  description: string;
-  sortOrder: number;
-  status: string;
-}
-
-interface ConnectivityLog {
-  id: number;
-  platformId: string;
-  success: boolean;
-  latency: number;
-  errorMessage: string;
-  checkedAt: string;
-}
-
-interface ConnectivitySummary {
-  uptime: number;
-  avgLatency: number;
-  lastCheck: string | null;
-  totalChecks: number;
-}
-
-interface ConnectivityData {
-  [platformId: string]: {
-    logs: ConnectivityLog[];
-    summary: ConnectivitySummary;
-  };
-}
-
-interface AttributeGroup {
-  id: string;
-  key: string;
-  label: string;
-  inputType: string;
-  enabled: boolean;
-  isFilterable?: boolean;
-  isComparable?: boolean;
-  isVisibleByDefault?: boolean;
-  sortOrder?: number;
-  boundField?: "none" | "site_tag" | "featured_models";
-}
-
-interface AttributeOption {
-  id: string;
-  groupKey: string;
-  value: string;
-  label: string;
-  color?: string;
-  enabled: boolean;
-  sortOrder?: number;
-}
-
-interface AttributeValue {
-  id: number;
-  platformId: string;
-  groupKey: string;
-  optionValue: string;
-  valueText: string;
-}
-
-interface PlatformConfigData {
-  groups: AttributeGroup[];
-  options: AttributeOption[];
-  values: AttributeValue[];
-  models: Array<{ id: string; key: string; name: string; vendor: string; featured: boolean }>;
-}
+import {
+  type AttributeOption,
+  type AttributeValue,
+  type ConnectivityData,
+  type Platform,
+  type PlatformConfigData,
+  clampTags,
+  getBadgeClass,
+  makeBadgeStyle,
+  makeSoftTagStyle,
+  normalizeExternalUrl,
+} from "@/lib/discover-compare";
 
 const t = getMessages();
-const DEFAULT_TAG_COLOR = "#737373";
 
-function makeSoftTagStyle(color?: string) {
-  const safeColor = color || DEFAULT_TAG_COLOR;
-  return { color: safeColor, backgroundColor: `${safeColor}1A`, borderColor: `${safeColor}33` };
-}
-
-function makeBadgeStyle(color?: string) {
-  const safeColor = color || DEFAULT_TAG_COLOR;
-  return { color: safeColor, backgroundColor: `${safeColor}14`, borderColor: `${safeColor}33` };
-}
-
-function logsToTrackerData(logs: ConnectivityLog[], nodeCount: number = 24): TrackerBlockProps[] {
+function logsToTrackerData(logs: Array<{ success: boolean; latency: number; errorMessage: string; checkedAt: string }>, nodeCount: number = 24): TrackerBlockProps[] {
   const data: TrackerBlockProps[] = [];
   const recentLogs = logs.slice(-nodeCount);
   const emptyCount = Math.max(0, nodeCount - recentLogs.length);
@@ -129,19 +52,8 @@ function generateGreyTrackerData(nodeCount: number = 24): TrackerBlockProps[] {
   }));
 }
 
-function getBadgeClass(tag: Platform["tag"]) {
-  if (tag === "premium") return "badge badge-premium";
-  if (tag === "free") return "badge badge-free";
-  if (tag === "dead") return "badge badge-dead";
-  return "badge badge-stable";
-}
-
-function clampTags<T>(items: T[], max: number) {
-  if (items.length <= max) return { visible: items, hiddenCount: 0 };
-  return { visible: items.slice(0, max), hiddenCount: items.length - max };
-}
-
 export default function DiscoverPage() {
+  const router = useRouter();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [connectivity, setConnectivity] = useState<ConnectivityData>({});
   const [config, setConfig] = useState<PlatformConfigData>({ groups: [], options: [], values: [], models: [] });
@@ -150,6 +62,7 @@ export default function DiscoverPage() {
   const [monitoredOnly, setMonitoredOnly] = useState(false);
   const [sortBy, setSortBy] = useState<"default" | "uptime" | "latency" | "billing">("default");
   const [selectedFilters, setSelectedFilters] = useState<Record<string, string[]>>({});
+  const [selectedCompareIds, setSelectedCompareIds] = useState<string[]>([]);
 
   useEffect(() => {
     Promise.all([fetch("/api/platforms"), fetch("/api/platforms/config")])
@@ -228,6 +141,10 @@ export default function DiscoverPage() {
     });
   };
 
+  const toggleComparePlatform = (platformId: string) => {
+    setSelectedCompareIds((prev) => prev.includes(platformId) ? prev.filter((id) => id !== platformId) : [...prev, platformId]);
+  };
+
   const getEffectiveUptime = useCallback((platform: Platform) => {
     const summary = connectivity[platform.id]?.summary;
     return summary && summary.totalChecks > 0 ? summary.uptime : platform.uptime;
@@ -262,12 +179,33 @@ export default function DiscoverPage() {
   };
 
   const getFeaturedModels = (platform: Platform) => {
-    if (!featuredModelsGroup) return platform.models;
+    if (!featuredModelsGroup) {
+      return platform.models.map((model) => ({
+        key: model,
+        label: model,
+        color: undefined as string | undefined,
+      }));
+    }
+
     const values = (valuesByPlatform[platform.id] || []).filter((item) => item.groupKey === featuredModelsGroup.key);
-    const labels = values
-      .map((item) => optionMap[`${item.groupKey}:${item.optionValue}`]?.label || item.optionValue)
-      .filter(Boolean);
-    return labels.length > 0 ? labels : platform.models;
+    const models = values
+      .map((item) => {
+        const option = optionMap[`${item.groupKey}:${item.optionValue}`];
+        return {
+          key: `${item.groupKey}:${item.optionValue}`,
+          label: option?.label || item.optionValue,
+          color: option?.color,
+        };
+      })
+      .filter((item) => item.label);
+
+    return models.length > 0
+      ? models
+      : platform.models.map((model) => ({
+          key: model,
+          label: model,
+          color: undefined as string | undefined,
+        }));
   };
 
   const normalizedKeyword = keyword.trim().toLowerCase();
@@ -302,6 +240,17 @@ export default function DiscoverPage() {
         return a.sortOrder - b.sortOrder;
       });
   }, [platforms, monitoredOnly, filterableGroups, selectedFilters, normalizedKeyword, sortBy, valuesByPlatform, getPlatformValues, getEffectiveLatency, getEffectiveUptime]);
+
+  useEffect(() => {
+    setSelectedCompareIds((prev) => prev.filter((id) => filteredPlatforms.some((platform) => platform.id === id)));
+  }, [filteredPlatforms]);
+
+  const compareDisabled = selectedCompareIds.length < 2;
+
+  const goToCompare = () => {
+    if (compareDisabled) return;
+    router.push(`/compare?ids=${selectedCompareIds.join(",")}`);
+  };
 
   return (
     <div className="space-y-6">
@@ -382,6 +331,26 @@ export default function DiscoverPage() {
       </section>
 
       <section className="admin-card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border-color)] px-6 py-5">
+          <div>
+            <div className="flex items-center gap-3">
+              <ArrowRightLeft className="h-4 w-4 text-[var(--accent-strong)]" />
+              <h3 className="text-base font-semibold">{t.discoverPage.compareSelectionTitle}</h3>
+              <span className="text-sm font-semibold text-[var(--accent-strong)]">{t.discoverPage.compareSelectedCountPrefix}{selectedCompareIds.length}{t.discoverPage.compareSelectedCountSuffix}</span>
+            </div>
+            <p className="mt-2 text-sm text-[var(--muted)]">{t.discoverPage.compareSelectionDescription}</p>
+          </div>
+          <button type="button" onClick={goToCompare} disabled={compareDisabled} className={`btn-glass btn-glass-primary ${compareDisabled ? "cursor-not-allowed opacity-50 hover:translate-y-0" : ""}`}>
+            <ArrowRightLeft className="h-4 w-4" />
+            {t.discoverPage.compareAction}
+          </button>
+        </div>
+        {compareDisabled && (
+          <div className="border-b border-[var(--border-color)] bg-[var(--accent-soft)]/20 px-6 py-3 text-sm text-[var(--muted)]">
+            {t.discoverPage.compareNeedAtLeastTwo}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] px-6 py-5">
           <div className="flex items-center gap-3">
             <Gauge className="h-4 w-4 text-[var(--accent-strong)]" />
@@ -400,6 +369,18 @@ export default function DiscoverPage() {
             <table className="min-w-full table-fixed text-sm">
               <thead>
                 <tr className="border-b border-[var(--border-color)] text-left text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                  <th className="w-[72px] px-3 py-4 text-center">
+                    <button
+                      type="button"
+                      onClick={goToCompare}
+                      disabled={compareDisabled}
+                      className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--card)] transition ${compareDisabled ? "cursor-not-allowed opacity-50" : "hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-sm"}`}
+                      title={t.discoverPage.compareAction}
+                      aria-label={t.discoverPage.compareAction}
+                    >
+                      <Image src="/favicon.png" alt={t.discoverPage.compareAction} width={22} height={22} className="rounded-md" />
+                    </button>
+                  </th>
                   <th className="w-[230px] px-5 py-4">{t.discoverPage.tablePlatform}</th>
                   <th className="w-[86px] px-3 py-4">{t.discoverPage.tableBilling}</th>
                   <th className="w-[190px] px-3 py-4">{t.discoverPage.tableModels}</th>
@@ -421,9 +402,21 @@ export default function DiscoverPage() {
                   const featuredModels = clampTags(getFeaturedModels(platform), 4);
                   const otherTags = clampTags(getPlatformValues(platform.id, false), 8);
                   const siteTagOption = getSiteTagOption(platform.id);
+                  const compareSelected = selectedCompareIds.includes(platform.id);
 
                   return (
                     <tr key={platform.id} className="table-row-hover border-b border-[var(--border-color)] last:border-b-0">
+                      <td className="px-3 py-4 align-top text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleComparePlatform(platform.id)}
+                          className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border transition ${compareSelected ? "border-[var(--accent)]/35 bg-[var(--accent-soft)]/60 shadow-sm" : "border-[var(--border-color)] bg-[var(--card)] opacity-70 grayscale hover:opacity-100 hover:grayscale-0"}`}
+                          title={compareSelected ? t.discoverPage.compareSelected : t.discoverPage.compareSelect}
+                          aria-label={compareSelected ? t.discoverPage.compareSelected : t.discoverPage.compareSelect}
+                        >
+                          <Image src="/favicon.png" alt="compare-icon" width={22} height={22} className="rounded-md" />
+                        </button>
+                      </td>
                       <td className="px-5 py-4 align-top">
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
@@ -440,7 +433,7 @@ export default function DiscoverPage() {
                       <td className="px-3 py-4 align-top">
                         <div className="flex min-h-[60px] flex-wrap content-start gap-1.5 overflow-hidden">
                           {featuredModels.visible.map((model) => (
-                            <span key={model} className="soft-tag">{model}</span>
+                            <span key={model.key} className="soft-tag" style={makeSoftTagStyle(model.color)}>{model.label}</span>
                           ))}
                           {featuredModels.hiddenCount > 0 && <span className="soft-tag soft-tag-muted">…</span>}
                         </div>
@@ -466,7 +459,7 @@ export default function DiscoverPage() {
                       </td>
                       <td className="px-5 py-4 align-top text-right">
                         <div className="flex justify-end gap-2">
-                          <a href={`https://${platform.url}`} target="_blank" rel="noreferrer" className="btn-glass">
+                          <a href={normalizeExternalUrl(platform.url)} target="_blank" rel="noreferrer" className="btn-glass">
                             <ExternalLink className="h-3.5 w-3.5" />{t.common.visit}
                           </a>
                           <Link href={`/forum/tag/${platform.id}`} className="btn-glass btn-glass-primary">{t.common.review}</Link>
