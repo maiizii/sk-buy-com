@@ -1,8 +1,12 @@
 export interface Platform {
-  id: string;
+  id: number;
+  slug: string;
+  reviewTopicId: number | null;
   name: string;
   url: string;
   baseUrl: string;
+  visitUrl: string;
+  visitCount: number;
   monitorEnabled: boolean;
   tag: "premium" | "free" | "stable" | "dead";
   tagLabel: string;
@@ -19,7 +23,7 @@ export interface Platform {
 
 export interface ConnectivityLog {
   id: number;
-  platformId: string;
+  platformId: number;
   success: boolean;
   latency: number;
   errorMessage: string;
@@ -34,7 +38,7 @@ export interface ConnectivitySummary {
 }
 
 export interface ConnectivityData {
-  [platformId: string]: {
+  [platformId: number]: {
     logs: ConnectivityLog[];
     summary: ConnectivitySummary;
   };
@@ -65,7 +69,7 @@ export interface AttributeOption {
 
 export interface AttributeValue {
   id: number;
-  platformId: string;
+  platformId: number;
   groupKey: string;
   optionValue: string;
   valueText: string;

@@ -8,7 +8,14 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const platform = getPlatformById(id);
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId <= 0) {
+      return Response.json(
+        { success: false, error: "平台不存在" },
+        { status: 404 }
+      );
+    }
+    const platform = getPlatformById(numericId);
     if (!platform) {
       return Response.json(
         { success: false, error: "平台不存在" },
@@ -31,9 +38,16 @@ export async function PUT(
   try {
     await requireAdmin();
     const { id } = await params;
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId <= 0) {
+      return Response.json(
+        { success: false, error: "平台不存在" },
+        { status: 404 }
+      );
+    }
     const data = await request.json();
 
-    const platform = updatePlatform(id, data);
+    const platform = updatePlatform(numericId, data);
     if (!platform) {
       return Response.json(
         { success: false, error: "平台不存在" },
@@ -55,8 +69,15 @@ export async function DELETE(
   try {
     await requireAdmin();
     const { id } = await params;
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId <= 0) {
+      return Response.json(
+        { success: false, error: "平台不存在" },
+        { status: 404 }
+      );
+    }
 
-    const deleted = deletePlatform(id);
+    const deleted = deletePlatform(numericId);
     if (!deleted) {
       return Response.json(
         { success: false, error: "平台不存在" },

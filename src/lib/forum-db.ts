@@ -1,5 +1,5 @@
 import db from "./db";
-import type { User } from "./db";
+import { clearPlatformReviewTopicId, getAllPlatforms, getPlatformById, setPlatformReviewTopicId, type User } from "./db";
 
 // ============================================================
 // Forum Category Types & Operations
@@ -31,6 +31,7 @@ function rowToCategory(row: ForumCategoryRow): ForumCategory {
 }
 
 export function getAllCategories(): ForumCategory[] {
+  ensureAllPlatformReviewTopics();
   const rows = db
     .prepare(`SELECT * FROM forum_categories ORDER BY sortOrder ASC`)
     .all() as ForumCategoryRow[];
@@ -100,6 +101,7 @@ export function deleteCategory(id: string): boolean {
 export interface ForumTopic {
   id: number;
   categoryId: string;
+  platformId: number | null;
   authorId: number;
   title: string;
   content: string;
@@ -120,6 +122,7 @@ export interface ForumTopic {
 interface ForumTopicRow {
   id: number;
   categoryId: string;
+  platformId: number | null;
   authorId: number;
   title: string;
   content: string;
@@ -147,6 +150,7 @@ function rowToTopic(row: ForumTopicRow): ForumTopic {
 
 export interface TopicListOptions {
   categoryId?: string;
+  excludeCategoryIds?: string[];
   tag?: string;
   authorId?: number;
   page?: number;
@@ -163,8 +167,13 @@ export interface TopicListResult {
 }
 
 export function getTopics(options: TopicListOptions = {}): TopicListResult {
+  if (!options.categoryId || options.categoryId === "reviews") {
+    ensureAllPlatformReviewTopics();
+  }
+
   const {
     categoryId,
+    excludeCategoryIds = [],
     tag,
     authorId,
     page = 1,
@@ -178,6 +187,10 @@ export function getTopics(options: TopicListOptions = {}): TopicListResult {
   if (categoryId) {
     where += " AND t.categoryId = ?";
     params.push(categoryId);
+  }
+  if (excludeCategoryIds.length > 0) {
+    where += ` AND t.categoryId NOT IN (${excludeCategoryIds.map(() => "?").join(", ")})`;
+    params.push(...excludeCategoryIds);
   }
   if (tag) {
     where += " AND t.tags LIKE ?";
@@ -193,9 +206,9 @@ export function getTopics(options: TopicListOptions = {}): TopicListResult {
     .get(...params) as { count: number };
   const total = countRow.count;
 
-  let orderBy = "t.pinned DESC, t.createdAt DESC";
-  if (sort === "hot") orderBy = "t.pinned DESC, t.replyCount DESC, t.viewCount DESC";
-  if (sort === "oldest") orderBy = "t.pinned DESC, t.createdAt ASC";
+  let orderBy = "t.pinned DESC, COALESCE(t.lastReplyAt, t.updatedAt, t.createdAt) DESC, t.id DESC";
+  if (sort === "hot") orderBy = "t.pinned DESC, t.replyCount DESC, t.viewCount DESC, COALESCE(t.lastReplyAt, t.updatedAt, t.createdAt) DESC";
+  if (sort === "oldest") orderBy = "t.pinned DESC, t.createdAt ASC, t.id ASC";
 
   const offset = (page - 1) * pageSize;
   const rows = db
@@ -232,8 +245,83 @@ export function getTopicById(id: number): ForumTopic | null {
   return row ? rowToTopic(row) : null;
 }
 
+export function getTopicByPlatformId(platformId: number): ForumTopic | null {
+  const row = db
+    .prepare(
+      `SELECT t.*, u.username as authorName, c.name as categoryName
+       FROM forum_topics t
+       LEFT JOIN users u ON t.authorId = u.id
+       LEFT JOIN forum_categories c ON t.categoryId = c.id
+       WHERE t.platformId = ?
+       LIMIT 1`
+    )
+    .get(platformId) as ForumTopicRow | undefined;
+  return row ? rowToTopic(row) : null;
+}
+
+function getPlatformReviewAuthorId(): number | null {
+  const adminRow = db
+    .prepare(`SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1`)
+    .get() as { id: number } | undefined;
+  if (adminRow) return adminRow.id;
+
+  const fallbackRow = db
+    .prepare(`SELECT id FROM users ORDER BY id ASC LIMIT 1`)
+    .get() as { id: number } | undefined;
+  return fallbackRow?.id ?? null;
+}
+
+export function ensureAllPlatformReviewTopics(): void {
+  const platforms = getAllPlatforms();
+  for (const platform of platforms) {
+    ensurePlatformReviewTopic(platform.id);
+  }
+}
+
+export function ensurePlatformReviewTopic(platformId: number): ForumTopic | null {
+  const existing = getTopicByPlatformId(platformId);
+  if (existing) {
+    const platform = getPlatformById(platformId);
+    if (platform?.reviewTopicId !== existing.id) {
+      setPlatformReviewTopicId(platformId, existing.id);
+    }
+    return existing;
+  }
+
+  const platform = getPlatformById(platformId);
+  if (platform?.reviewTopicId) {
+    clearPlatformReviewTopicId(platformId);
+  }
+  if (!platform) return null;
+
+  const reviewCategory = getCategoryById("reviews");
+  if (!reviewCategory) return null;
+
+  const authorId = getPlatformReviewAuthorId();
+  if (!authorId) return null;
+
+  const title = platform.name.trim() || String(platformId);
+  const content = (platform.description || platform.url || platform.name).trim();
+
+  try {
+    const topic = createTopic({
+      categoryId: reviewCategory.id,
+      platformId,
+      authorId,
+      title,
+      content,
+      tags: [],
+    });
+    setPlatformReviewTopicId(platformId, topic.id);
+    return topic;
+  } catch {
+    return getTopicByPlatformId(platformId);
+  }
+}
+
 export function createTopic(data: {
   categoryId: string;
+  platformId?: number | null;
   authorId: number;
   title: string;
   content: string;
@@ -242,11 +330,12 @@ export function createTopic(data: {
   const now = new Date().toISOString();
   const result = db
     .prepare(
-      `INSERT INTO forum_topics (categoryId, authorId, title, content, tags, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO forum_topics (categoryId, platformId, authorId, title, content, tags, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       data.categoryId,
+      data.platformId || null,
       data.authorId,
       data.title,
       data.content,
@@ -293,6 +382,10 @@ export function deleteTopic(id: number): boolean {
     db.prepare(
       `UPDATE forum_categories SET topicCount = MAX(0, topicCount - 1) WHERE id = ?`
     ).run(topic.categoryId);
+
+    if (topic.platformId) {
+      clearPlatformReviewTopicId(topic.platformId);
+    }
   }
   return result.changes > 0;
 }
@@ -396,7 +489,7 @@ export function deleteReply(id: number): boolean {
 // ============================================================
 export interface PlatformRating {
   id: number;
-  platformId: string;
+  platformId: number;
   userId: number;
   score: number;
   comment: string;
@@ -410,7 +503,7 @@ export interface RatingSummary {
   distribution: Record<number, number>;
 }
 
-export function getRatingsByPlatform(platformId: string): PlatformRating[] {
+export function getRatingsByPlatform(platformId: number): PlatformRating[] {
   return db
     .prepare(
       `SELECT r.*, u.username FROM platform_ratings r LEFT JOIN users u ON r.userId = u.id
@@ -419,7 +512,7 @@ export function getRatingsByPlatform(platformId: string): PlatformRating[] {
     .all(platformId) as PlatformRating[];
 }
 
-export function getRatingSummary(platformId: string): RatingSummary {
+export function getRatingSummary(platformId: number): RatingSummary {
   const row = db
     .prepare(
       `SELECT AVG(score) as avgScore, COUNT(*) as totalRatings FROM platform_ratings WHERE platformId = ?`
@@ -442,15 +535,15 @@ export function getRatingSummary(platformId: string): RatingSummary {
   };
 }
 
-export function getAllRatingSummaries(): Record<string, RatingSummary> {
+export function getAllRatingSummaries(): Record<number, RatingSummary> {
   const rows = db
     .prepare(
       `SELECT platformId, AVG(score) as avgScore, COUNT(*) as totalRatings
        FROM platform_ratings GROUP BY platformId`
     )
-    .all() as { platformId: string; avgScore: number; totalRatings: number }[];
+    .all() as { platformId: number; avgScore: number; totalRatings: number }[];
 
-  const result: Record<string, RatingSummary> = {};
+  const result: Record<number, RatingSummary> = {};
   for (const row of rows) {
     result[row.platformId] = {
       avgScore: Math.round(row.avgScore * 10) / 10,
@@ -462,7 +555,7 @@ export function getAllRatingSummaries(): Record<string, RatingSummary> {
 }
 
 export function upsertRating(data: {
-  platformId: string;
+  platformId: number;
   userId: number;
   score: number;
   comment?: string;

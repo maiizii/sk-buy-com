@@ -15,11 +15,330 @@ const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+function getTableInfo(tableName: string) {
+  return db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
+    name: string;
+    type: string;
+    pk: number;
+  }>;
+}
+
 function ensureColumn(tableName: string, columnName: string, definition: string) {
-  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  const columns = getTableInfo(tableName);
   if (!columns.some((column) => column.name === columnName)) {
     db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
   }
+}
+
+function getForeignKeyInfo(tableName: string) {
+  return db.prepare(`PRAGMA foreign_key_list(${tableName})`).all() as Array<{
+    id: number;
+    seq: number;
+    table: string;
+    from: string;
+    to: string;
+    on_update: string;
+    on_delete: string;
+    match: string;
+  }>;
+}
+
+function ensureForumRepliesForeignKey() {
+  const topicForeignKey = getForeignKeyInfo("forum_replies").find((foreignKey) => foreignKey.from === "topicId");
+  if (!topicForeignKey || topicForeignKey.table === "forum_topics") {
+    return;
+  }
+
+  const migrate = db.transaction(() => {
+    db.pragma("foreign_keys = OFF");
+    db.exec(`
+      ALTER TABLE forum_replies RENAME TO forum_replies_legacy;
+
+      CREATE TABLE forum_replies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topicId INTEGER NOT NULL,
+        authorId INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (topicId) REFERENCES forum_topics(id) ON DELETE CASCADE,
+        FOREIGN KEY (authorId) REFERENCES users(id)
+      );
+
+      INSERT INTO forum_replies (id, topicId, authorId, content, createdAt, updatedAt)
+      SELECT id, topicId, authorId, content, createdAt, updatedAt
+      FROM forum_replies_legacy;
+
+      DROP TABLE forum_replies_legacy;
+    `);
+    db.pragma("foreign_keys = ON");
+  });
+
+  migrate();
+}
+
+function reconcileForumCategoryTopicCounts() {
+  db.exec(`
+    UPDATE forum_categories SET topicCount = 0;
+
+    UPDATE forum_categories
+    SET topicCount = (
+      SELECT COUNT(*)
+      FROM forum_topics t
+      WHERE t.categoryId = forum_categories.id
+    );
+  `);
+}
+
+function isLegacyPlatformSchema() {
+  const idColumn = getTableInfo("platforms").find((column) => column.name === "id");
+  return Boolean(idColumn && /TEXT/i.test(idColumn.type || ""));
+}
+
+function migrateLegacyPlatformSchema() {
+  const migrate = db.transaction(() => {
+    db.pragma("foreign_keys = OFF");
+
+    db.exec(`
+      ALTER TABLE platforms RENAME TO platforms_legacy;
+      ALTER TABLE platform_attribute_values RENAME TO platform_attribute_values_legacy;
+      ALTER TABLE platform_models RENAME TO platform_models_legacy;
+      ALTER TABLE connectivity_logs RENAME TO connectivity_logs_legacy;
+      ALTER TABLE probe_tasks RENAME TO probe_tasks_legacy;
+      ALTER TABLE probe_aggregates RENAME TO probe_aggregates_legacy;
+      ALTER TABLE forum_topics RENAME TO forum_topics_legacy;
+      ALTER TABLE platform_ratings RENAME TO platform_ratings_legacy;
+    `);
+
+    db.exec(`
+      CREATE TABLE platforms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        baseUrl TEXT DEFAULT '',
+        visitUrl TEXT DEFAULT '',
+        visitCount INTEGER DEFAULT 0,
+        monitorEnabled INTEGER DEFAULT 0,
+        tag TEXT NOT NULL CHECK(tag IN ('premium', 'free', 'stable', 'dead')),
+        tagLabel TEXT NOT NULL,
+        billingRate TEXT NOT NULL,
+        billingColor TEXT DEFAULT 'text-foreground',
+        models TEXT DEFAULT '[]',
+        uptime REAL DEFAULT 0,
+        latency INTEGER DEFAULT 0,
+        joinDate TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        sortOrder INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',
+        metaJson TEXT DEFAULT '{}',
+        reviewTopicId INTEGER,
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE platform_attribute_values (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platformId INTEGER NOT NULL,
+        groupKey TEXT NOT NULL,
+        optionValue TEXT DEFAULT '',
+        valueText TEXT DEFAULT '',
+        valueNumber REAL,
+        valueBoolean INTEGER,
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE platform_models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platformId INTEGER NOT NULL,
+        modelKey TEXT NOT NULL,
+        isFeatured INTEGER DEFAULT 0,
+        enabled INTEGER DEFAULT 1,
+        remark TEXT DEFAULT '',
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now')),
+        UNIQUE(platformId, modelKey),
+        FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE connectivity_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platformId INTEGER NOT NULL,
+        success INTEGER NOT NULL,
+        latency INTEGER DEFAULT 0,
+        errorMessage TEXT DEFAULT '',
+        checkedAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE probe_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platformId INTEGER NOT NULL,
+        probeType TEXT NOT NULL,
+        targetType TEXT DEFAULT 'platform',
+        targetKey TEXT DEFAULT '',
+        enabled INTEGER DEFAULT 1,
+        intervalSeconds INTEGER DEFAULT 300,
+        timeoutMs INTEGER DEFAULT 10000,
+        retryCount INTEGER DEFAULT 1,
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE probe_aggregates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platformId INTEGER NOT NULL,
+        targetType TEXT DEFAULT 'platform',
+        targetKey TEXT DEFAULT '',
+        timeWindow TEXT NOT NULL,
+        uptime REAL DEFAULT 0,
+        avgLatency INTEGER DEFAULT 0,
+        successCount INTEGER DEFAULT 0,
+        failureCount INTEGER DEFAULT 0,
+        lastCheckedAt TEXT,
+        updatedAt TEXT DEFAULT (datetime('now')),
+        UNIQUE(platformId, targetType, targetKey, timeWindow),
+        FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE forum_topics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        categoryId TEXT NOT NULL,
+        platformId INTEGER,
+        authorId INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        pinned INTEGER DEFAULT 0,
+        locked INTEGER DEFAULT 0,
+        viewCount INTEGER DEFAULT 0,
+        replyCount INTEGER DEFAULT 0,
+        lastReplyAt TEXT,
+        lastReplyBy INTEGER,
+        tags TEXT DEFAULT '[]',
+        createdAt TEXT DEFAULT (datetime('now')),
+        updatedAt TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (categoryId) REFERENCES forum_categories(id),
+        FOREIGN KEY (authorId) REFERENCES users(id),
+        FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE platform_ratings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platformId INTEGER NOT NULL,
+        userId INTEGER NOT NULL,
+        score INTEGER NOT NULL CHECK(score >= 1 AND score <= 5),
+        comment TEXT DEFAULT '',
+        createdAt TEXT DEFAULT (datetime('now')),
+        UNIQUE(platformId, userId),
+        FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE CASCADE,
+        FOREIGN KEY (userId) REFERENCES users(id)
+      );
+    `);
+
+    db.exec(`
+      INSERT INTO platforms (
+        slug, name, url, baseUrl, monitorEnabled, tag, tagLabel, billingRate,
+        billingColor, models, uptime, latency, joinDate, description,
+        sortOrder, status, metaJson, createdAt, updatedAt
+      )
+      SELECT
+        id, name, url, baseUrl, monitorEnabled, tag, tagLabel, billingRate,
+        billingColor, models, uptime, latency, joinDate, description,
+        sortOrder, status, metaJson, createdAt, updatedAt
+      FROM platforms_legacy
+      ORDER BY sortOrder ASC, createdAt DESC, id ASC;
+
+      INSERT INTO platform_attribute_values (
+        id, platformId, groupKey, optionValue, valueText, valueNumber,
+        valueBoolean, createdAt, updatedAt
+      )
+      SELECT
+        pav.id, p.id, pav.groupKey, pav.optionValue, pav.valueText, pav.valueNumber,
+        pav.valueBoolean, pav.createdAt, pav.updatedAt
+      FROM platform_attribute_values_legacy pav
+      JOIN platforms p ON p.slug = pav.platformId;
+
+      INSERT INTO platform_models (
+        id, platformId, modelKey, isFeatured, enabled, remark, createdAt, updatedAt
+      )
+      SELECT
+        pm.id, p.id, pm.modelKey, pm.isFeatured, pm.enabled, pm.remark, pm.createdAt, pm.updatedAt
+      FROM platform_models_legacy pm
+      JOIN platforms p ON p.slug = pm.platformId;
+
+      INSERT INTO connectivity_logs (
+        id, platformId, success, latency, errorMessage, checkedAt
+      )
+      SELECT
+        cl.id, p.id, cl.success, cl.latency, cl.errorMessage, cl.checkedAt
+      FROM connectivity_logs_legacy cl
+      JOIN platforms p ON p.slug = cl.platformId;
+
+      INSERT INTO probe_tasks (
+        id, platformId, probeType, targetType, targetKey, enabled,
+        intervalSeconds, timeoutMs, retryCount, createdAt, updatedAt
+      )
+      SELECT
+        pt.id, p.id, pt.probeType, pt.targetType, pt.targetKey, pt.enabled,
+        pt.intervalSeconds, pt.timeoutMs, pt.retryCount, pt.createdAt, pt.updatedAt
+      FROM probe_tasks_legacy pt
+      JOIN platforms p ON p.slug = pt.platformId;
+
+      INSERT INTO probe_aggregates (
+        id, platformId, targetType, targetKey, timeWindow, uptime,
+        avgLatency, successCount, failureCount, lastCheckedAt, updatedAt
+      )
+      SELECT
+        pa.id, p.id, pa.targetType, pa.targetKey, pa.timeWindow, pa.uptime,
+        pa.avgLatency, pa.successCount, pa.failureCount, pa.lastCheckedAt, pa.updatedAt
+      FROM probe_aggregates_legacy pa
+      JOIN platforms p ON p.slug = pa.platformId;
+
+      INSERT INTO forum_topics (
+        id, categoryId, platformId, authorId, title, content, pinned, locked,
+        viewCount, replyCount, lastReplyAt, lastReplyBy, tags, createdAt, updatedAt
+      )
+      SELECT
+        ft.id, ft.categoryId, p.id, ft.authorId, ft.title, ft.content, ft.pinned, ft.locked,
+        ft.viewCount, ft.replyCount, ft.lastReplyAt, ft.lastReplyBy, ft.tags, ft.createdAt, ft.updatedAt
+      FROM forum_topics_legacy ft
+      LEFT JOIN platforms p ON p.slug = ft.platformId;
+
+      INSERT INTO platform_ratings (
+        id, platformId, userId, score, comment, createdAt
+      )
+      SELECT
+        pr.id, p.id, pr.userId, pr.score, pr.comment, pr.createdAt
+      FROM platform_ratings_legacy pr
+      JOIN platforms p ON p.slug = pr.platformId;
+
+      UPDATE platforms
+      SET reviewTopicId = (
+        SELECT ft.id
+        FROM forum_topics ft
+        WHERE ft.platformId = platforms.id
+        ORDER BY ft.id ASC
+        LIMIT 1
+      )
+      WHERE reviewTopicId IS NULL;
+
+      DROP TABLE platform_attribute_values_legacy;
+      DROP TABLE platform_models_legacy;
+      DROP TABLE connectivity_logs_legacy;
+      DROP TABLE probe_tasks_legacy;
+      DROP TABLE probe_aggregates_legacy;
+      DROP TABLE platform_ratings_legacy;
+      DROP TABLE forum_topics_legacy;
+      DROP TABLE platforms_legacy;
+    `);
+
+    db.pragma("foreign_keys = ON");
+  });
+
+  migrate();
 }
 
 db.exec(`
@@ -70,10 +389,13 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS platforms (
-    id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     url TEXT NOT NULL,
     baseUrl TEXT DEFAULT '',
+    visitUrl TEXT DEFAULT '',
+    visitCount INTEGER DEFAULT 0,
     monitorEnabled INTEGER DEFAULT 0,
     tag TEXT NOT NULL CHECK(tag IN ('premium', 'free', 'stable', 'dead')),
     tagLabel TEXT NOT NULL,
@@ -87,6 +409,7 @@ db.exec(`
     sortOrder INTEGER DEFAULT 0,
     status TEXT DEFAULT 'active',
     metaJson TEXT DEFAULT '{}',
+    reviewTopicId INTEGER,
     createdAt TEXT DEFAULT (datetime('now')),
     updatedAt TEXT DEFAULT (datetime('now'))
   );
@@ -122,7 +445,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS platform_attribute_values (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    platformId TEXT NOT NULL,
+    platformId INTEGER NOT NULL,
     groupKey TEXT NOT NULL,
     optionValue TEXT DEFAULT '',
     valueText TEXT DEFAULT '',
@@ -147,7 +470,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS platform_models (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    platformId TEXT NOT NULL,
+    platformId INTEGER NOT NULL,
     modelKey TEXT NOT NULL,
     isFeatured INTEGER DEFAULT 0,
     enabled INTEGER DEFAULT 1,
@@ -160,7 +483,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS connectivity_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    platformId TEXT NOT NULL,
+    platformId INTEGER NOT NULL,
     success INTEGER NOT NULL,
     latency INTEGER DEFAULT 0,
     errorMessage TEXT DEFAULT '',
@@ -170,7 +493,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS probe_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    platformId TEXT NOT NULL,
+    platformId INTEGER NOT NULL,
     probeType TEXT NOT NULL,
     targetType TEXT DEFAULT 'platform',
     targetKey TEXT DEFAULT '',
@@ -185,7 +508,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS probe_aggregates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    platformId TEXT NOT NULL,
+    platformId INTEGER NOT NULL,
     targetType TEXT DEFAULT 'platform',
     targetKey TEXT DEFAULT '',
     timeWindow TEXT NOT NULL,
@@ -213,6 +536,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS forum_topics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     categoryId TEXT NOT NULL,
+    platformId INTEGER,
     authorId INTEGER NOT NULL,
     title TEXT NOT NULL,
     content TEXT NOT NULL,
@@ -226,7 +550,8 @@ db.exec(`
     createdAt TEXT DEFAULT (datetime('now')),
     updatedAt TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (categoryId) REFERENCES forum_categories(id),
-    FOREIGN KEY (authorId) REFERENCES users(id)
+    FOREIGN KEY (authorId) REFERENCES users(id),
+    FOREIGN KEY (platformId) REFERENCES platforms(id) ON DELETE SET NULL
   );
 
   CREATE TABLE IF NOT EXISTS forum_replies (
@@ -242,7 +567,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS platform_ratings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    platformId TEXT NOT NULL,
+    platformId INTEGER NOT NULL,
     userId INTEGER NOT NULL,
     score INTEGER NOT NULL CHECK(score >= 1 AND score <= 5),
     comment TEXT DEFAULT '',
@@ -253,6 +578,10 @@ db.exec(`
   );
 `);
 
+if (isLegacyPlatformSchema()) {
+  migrateLegacyPlatformSchema();
+}
+
 ensureColumn("platform_attribute_options", "metaJson", "TEXT DEFAULT '{}' ");
 
 function hasColumn(tableName: string, columnName: string) {
@@ -262,6 +591,9 @@ function hasColumn(tableName: string, columnName: string) {
 
 if (!hasColumn("users", "displayName")) {
   db.exec(`ALTER TABLE users ADD COLUMN displayName TEXT DEFAULT ''`);
+}
+if (!hasColumn("forum_topics", "platformId")) {
+  db.exec(`ALTER TABLE forum_topics ADD COLUMN platformId INTEGER`);
 }
 if (!hasColumn("users", "emailVerified")) {
   db.exec(`ALTER TABLE users ADD COLUMN emailVerified INTEGER DEFAULT 0`);
@@ -287,6 +619,9 @@ db.exec(`
   WHERE role = 'admin'
 `);
 try { db.exec(`ALTER TABLE platforms ADD COLUMN baseUrl TEXT DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE platforms ADD COLUMN visitUrl TEXT DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE platforms ADD COLUMN visitCount INTEGER DEFAULT 0`); } catch {}
+db.exec(`UPDATE platforms SET visitUrl = COALESCE(visitUrl, ''), visitCount = COALESCE(visitCount, 0)`);
 if (!hasColumn("platform_attribute_options", "color")) {
   db.exec(`ALTER TABLE platform_attribute_options ADD COLUMN color TEXT DEFAULT ''`);
 }
@@ -295,10 +630,14 @@ try { db.exec(`ALTER TABLE platforms ADD COLUMN status TEXT DEFAULT 'active'`); 
 try { db.exec(`ALTER TABLE platforms ADD COLUMN metaJson TEXT DEFAULT '{}'`); } catch {}
 try { db.exec(`ALTER TABLE platform_attribute_groups ADD COLUMN metaJson TEXT DEFAULT '{}'`); } catch {}
 
+ensureForumRepliesForeignKey();
+reconcileForumCategoryTopicCounts();
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token ON email_verification_tokens(token)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user ON email_verification_tokens(userId, expiresAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_connectivity_logs_platform_time ON connectivity_logs(platformId, checkedAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_topics_category ON forum_topics(categoryId, createdAt DESC)`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_forum_topics_platform_unique ON forum_topics(platformId) WHERE platformId IS NOT NULL`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_replies_topic ON forum_replies(topicId, createdAt ASC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_ratings_platform ON platform_ratings(platformId)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_attribute_values_platform ON platform_attribute_values(platformId, groupKey)`);
@@ -550,10 +889,14 @@ export function verifyEmailByCode(email: string, code: string): User | null {
 }
 
 export interface Platform {
-  id: string;
+  id: number;
+  slug: string;
+  reviewTopicId: number | null;
   name: string;
   url: string;
   baseUrl: string;
+  visitUrl: string;
+  visitCount: number;
   monitorEnabled: boolean;
   tag: "premium" | "free" | "stable" | "dead";
   tagLabel: string;
@@ -574,10 +917,14 @@ export interface Platform {
 }
 
 interface PlatformRow {
-  id: string;
+  id: number;
+  slug: string;
+  reviewTopicId: number | null;
   name: string;
   url: string;
   baseUrl: string;
+  visitUrl: string;
+  visitCount: number;
   monitorEnabled: number;
   tag: string;
   tagLabel: string;
@@ -615,28 +962,38 @@ export function getAllPlatforms(): Platform[] {
   return rows.map(rowToPlatform);
 }
 
-export function getPlatformById(id: string): Platform | null {
+export function getPlatformById(id: number): Platform | null {
   const row = db.prepare(`SELECT * FROM platforms WHERE id = ?`).get(id) as PlatformRow | undefined;
   return row ? rowToPlatform(row) : null;
 }
 
+export function getPlatformBySlug(slug: string): Platform | null {
+  const row = db.prepare(`SELECT * FROM platforms WHERE slug = ?`).get(slug) as PlatformRow | undefined;
+  return row ? rowToPlatform(row) : null;
+}
+
 export function createPlatform(
-  data: Omit<Platform, "createdAt" | "updatedAt" | "status" | "metaJson" | "descriptionZh" | "descriptionEn"> & {
+  data: Omit<Platform, "id" | "reviewTopicId" | "visitUrl" | "visitCount" | "createdAt" | "updatedAt" | "status" | "metaJson" | "descriptionZh" | "descriptionEn"> & {
     status?: string;
     metaJson?: string;
     descriptionZh?: string;
     descriptionEn?: string;
+    reviewTopicId?: number | null;
+    visitUrl?: string;
+    visitCount?: number;
   }
 ): Platform {
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO platforms (id, name, url, baseUrl, monitorEnabled, tag, tagLabel, billingRate, billingColor, models, uptime, latency, joinDate, description, sortOrder, status, metaJson, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  const result = db.prepare(
+    `INSERT INTO platforms (slug, name, url, baseUrl, visitUrl, visitCount, monitorEnabled, tag, tagLabel, billingRate, billingColor, models, uptime, latency, joinDate, description, sortOrder, status, metaJson, reviewTopicId, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    data.id,
+    data.slug,
     data.name,
     data.url,
     data.baseUrl || "",
+    data.visitUrl || "",
+    data.visitCount ?? 0,
     data.monitorEnabled ? 1 : 0,
     data.tag,
     data.tagLabel,
@@ -650,13 +1007,14 @@ export function createPlatform(
     data.sortOrder || 0,
     data.status || "active",
     data.metaJson || "{}",
+    data.reviewTopicId ?? null,
     now,
     now
   );
-  return getPlatformById(data.id)!;
+  return getPlatformById(result.lastInsertRowid as number)!;
 }
 
-export function updatePlatform(id: string, data: Partial<Omit<Platform, "id" | "createdAt" | "updatedAt">>): Platform | null {
+export function updatePlatform(id: number, data: Partial<Omit<Platform, "id" | "createdAt" | "updatedAt">>): Platform | null {
   const existing = getPlatformById(id);
   if (!existing) return null;
 
@@ -665,13 +1023,15 @@ export function updatePlatform(id: string, data: Partial<Omit<Platform, "id" | "
 
   db.prepare(
     `UPDATE platforms SET
-      name = ?, url = ?, baseUrl = ?, monitorEnabled = ?, tag = ?, tagLabel = ?, billingRate = ?, billingColor = ?,
-      models = ?, uptime = ?, latency = ?, joinDate = ?, description = ?, sortOrder = ?, status = ?, metaJson = ?, updatedAt = ?
+      slug = ?, name = ?, url = ?, baseUrl = ?, visitUrl = ?, monitorEnabled = ?, tag = ?, tagLabel = ?, billingRate = ?, billingColor = ?,
+      models = ?, uptime = ?, latency = ?, joinDate = ?, description = ?, sortOrder = ?, status = ?, metaJson = ?, reviewTopicId = ?, visitCount = ?, updatedAt = ?
      WHERE id = ?`
   ).run(
+    updated.slug,
     updated.name,
     updated.url,
     updated.baseUrl || "",
+    updated.visitUrl || "",
     updated.monitorEnabled ? 1 : 0,
     updated.tag,
     updated.tagLabel,
@@ -685,13 +1045,27 @@ export function updatePlatform(id: string, data: Partial<Omit<Platform, "id" | "
     updated.sortOrder,
     updated.status,
     updated.metaJson,
+    updated.reviewTopicId ?? null,
+    updated.visitCount,
     now,
     id
   );
   return getPlatformById(id);
 }
 
-export function deletePlatform(id: string): boolean {
+export function setPlatformReviewTopicId(id: number, reviewTopicId: number): void {
+  db.prepare(`UPDATE platforms SET reviewTopicId = ?, updatedAt = datetime('now') WHERE id = ?`).run(reviewTopicId, id);
+}
+
+export function clearPlatformReviewTopicId(id: number): void {
+  db.prepare(`UPDATE platforms SET reviewTopicId = NULL, updatedAt = datetime('now') WHERE id = ?`).run(id);
+}
+
+export function incrementPlatformVisitCount(id: number): void {
+  db.prepare(`UPDATE platforms SET visitCount = COALESCE(visitCount, 0) + 1, updatedAt = datetime('now') WHERE id = ?`).run(id);
+}
+
+export function deletePlatform(id: number): boolean {
   const result = db.prepare(`DELETE FROM platforms WHERE id = ?`).run(id);
   return result.changes > 0;
 }
@@ -734,7 +1108,7 @@ export interface ModelRegistryRecord {
 
 export interface PlatformAttributeValueRecord {
   id: number;
-  platformId: string;
+  platformId: number;
   groupKey: string;
   optionValue: string;
   valueText: string;
@@ -809,7 +1183,7 @@ function rowToPlatformAttributeOption(row: {
 
 function rowToPlatformAttributeValue(row: {
   id: number;
-  platformId: string;
+  platformId: number;
   groupKey: string;
   optionValue: string;
   valueText: string;
@@ -1031,7 +1405,7 @@ export function deletePlatformAttributeOption(id: string): boolean {
   return result.changes > 0;
 }
 
-export function getPlatformAttributeValues(platformId?: string): PlatformAttributeValueRecord[] {
+export function getPlatformAttributeValues(platformId?: number): PlatformAttributeValueRecord[] {
   const rows = platformId
     ? db.prepare(`SELECT * FROM platform_attribute_values WHERE platformId = ? ORDER BY groupKey ASC, id ASC`).all(platformId)
     : db.prepare(`SELECT * FROM platform_attribute_values ORDER BY platformId ASC, groupKey ASC, id ASC`).all();
@@ -1039,7 +1413,7 @@ export function getPlatformAttributeValues(platformId?: string): PlatformAttribu
   return rows.map((row) =>
     rowToPlatformAttributeValue(row as {
       id: number;
-      platformId: string;
+      platformId: number;
       groupKey: string;
       optionValue: string;
       valueText: string;
@@ -1050,7 +1424,7 @@ export function getPlatformAttributeValues(platformId?: string): PlatformAttribu
 }
 
 export function replacePlatformAttributeValues(
-  platformId: string,
+  platformId: number,
   values: Array<{
     groupKey: string;
     optionValue?: string;
@@ -1092,7 +1466,7 @@ export function getModelRegistry(): ModelRegistryRecord[] {
 
 export interface ConnectivityLog {
   id: number;
-  platformId: string;
+  platformId: number;
   success: boolean;
   latency: number;
   errorMessage: string;
@@ -1101,28 +1475,49 @@ export interface ConnectivityLog {
 
 interface ConnectivityLogRow {
   id: number;
-  platformId: string;
+  platformId: number;
   success: number;
   latency: number;
   errorMessage: string;
   checkedAt: string;
 }
 
-export function saveConnectivityLog(platformId: string, success: boolean, latency: number, errorMessage: string = ""): void {
+function rowToConnectivityLog(row: ConnectivityLogRow): ConnectivityLog {
+  return {
+    ...row,
+    success: row.success === 1,
+  };
+}
+
+export function saveConnectivityLog(platformId: number, success: boolean, latency: number, errorMessage: string = ""): void {
   db.prepare(
     `INSERT INTO connectivity_logs (platformId, success, latency, errorMessage, checkedAt)
      VALUES (?, ?, ?, ?, datetime('now'))`
   ).run(platformId, success ? 1 : 0, latency, errorMessage);
 }
 
-export function getLatestConnectivityLogs(platformId: string, limit: number = 60): ConnectivityLog[] {
+export function getLatestConnectivityLogs(platformId: number, limit: number = 60): ConnectivityLog[] {
   const rows = db
     .prepare(`SELECT * FROM connectivity_logs WHERE platformId = ? ORDER BY checkedAt DESC LIMIT ?`)
     .all(platformId, limit) as ConnectivityLogRow[];
-  return rows.map((r) => ({ ...r, success: r.success === 1 }));
+  return rows.map(rowToConnectivityLog);
 }
 
-export function getHourlyConnectivityLogs(platformId: string): ConnectivityLog[] {
+export function getConnectivityLogsInRange(platformId: number, hours: number = 24): ConnectivityLog[] {
+  const safeHours = Math.max(1, Math.floor(hours));
+  const rows = db
+    .prepare(
+      `SELECT id, platformId, success, latency, errorMessage, checkedAt
+       FROM connectivity_logs
+       WHERE platformId = ? AND checkedAt >= datetime('now', ?)
+       ORDER BY checkedAt ASC`
+    )
+    .all(platformId, `-${safeHours} hours`) as ConnectivityLogRow[];
+  return rows.map(rowToConnectivityLog);
+}
+
+export function getHourlyConnectivityLogs(platformId: number, hours: number = 24): ConnectivityLog[] {
+  const safeHours = Math.max(1, Math.floor(hours));
   const rows = db
     .prepare(
       `WITH hourly AS (
@@ -1130,14 +1525,14 @@ export function getHourlyConnectivityLogs(platformId: string): ConnectivityLog[]
           strftime('%Y-%m-%d %H', checkedAt) AS hour_bucket,
           ROW_NUMBER() OVER (PARTITION BY strftime('%Y-%m-%d %H', checkedAt) ORDER BY checkedAt DESC) AS rn
         FROM connectivity_logs
-        WHERE platformId = ? AND checkedAt >= datetime('now', '-24 hours')
+        WHERE platformId = ? AND checkedAt >= datetime('now', ?)
       )
       SELECT id, platformId, success, latency, errorMessage, checkedAt
       FROM hourly WHERE rn = 1
       ORDER BY checkedAt ASC`
     )
-    .all(platformId) as ConnectivityLogRow[];
-  return rows.map((r) => ({ ...r, success: r.success === 1 }));
+    .all(platformId, `-${safeHours} hours`) as ConnectivityLogRow[];
+  return rows.map(rowToConnectivityLog);
 }
 
 export interface ConnectivitySummary {
@@ -1147,7 +1542,8 @@ export interface ConnectivitySummary {
   totalChecks: number;
 }
 
-export function getConnectivitySummary(platformId: string): ConnectivitySummary {
+export function getConnectivitySummary(platformId: number, hours: number = 24): ConnectivitySummary {
+  const safeHours = Math.max(1, Math.floor(hours));
   const row = db
     .prepare(
       `SELECT
@@ -1156,18 +1552,20 @@ export function getConnectivitySummary(platformId: string): ConnectivitySummary 
         AVG(CASE WHEN success = 1 THEN latency ELSE NULL END) as avgLatency,
         MAX(checkedAt) as lastCheck
        FROM connectivity_logs
-       WHERE platformId = ? AND checkedAt >= datetime('now', '-24 hours')`
+       WHERE platformId = ? AND checkedAt >= datetime('now', ?)`
     )
-    .get(platformId) as {
+    .get(platformId, `-${safeHours} hours`) as {
       totalChecks: number;
-      successCount: number;
+      successCount: number | null;
       avgLatency: number | null;
       lastCheck: string | null;
     };
 
+  const successCount = row.successCount || 0;
+
   return {
     totalChecks: row.totalChecks,
-    uptime: row.totalChecks > 0 ? Math.round((row.successCount / row.totalChecks) * 1000) / 10 : 0,
+    uptime: row.totalChecks > 0 ? Math.round((successCount / row.totalChecks) * 1000) / 10 : 0,
     avgLatency: Math.round(row.avgLatency || 0),
     lastCheck: row.lastCheck,
   };
@@ -1178,8 +1576,11 @@ export function getMonitorEnabledPlatforms(): Platform[] {
   return rows.map(rowToPlatform);
 }
 
-export function cleanOldConnectivityLogs(): number {
-  const result = db.prepare(`DELETE FROM connectivity_logs WHERE checkedAt < datetime('now', '-3 days')`).run();
+export function cleanOldConnectivityLogs(retentionDays: number = 7): number {
+  const safeDays = Math.max(1, Math.floor(retentionDays));
+  const result = db
+    .prepare(`DELETE FROM connectivity_logs WHERE checkedAt < datetime('now', ?)`)
+    .run(`-${safeDays} days`);
   return result.changes;
 }
 
@@ -1233,9 +1634,9 @@ function seedData() {
   const platformCount = (db.prepare(`SELECT COUNT(*) as count FROM platforms`).get() as { count: number }).count;
 
   if (platformCount === 0) {
-    const seedPlatforms: Omit<Platform, "createdAt" | "updatedAt">[] = [
+    const seedPlatforms: Array<Omit<Platform, "id" | "reviewTopicId" | "visitUrl" | "visitCount" | "createdAt" | "updatedAt">> = [
       {
-        id: "openrouter-pro",
+        slug: "openrouter-pro",
         name: "OpenRouter Pro",
         url: "openrouter.ai",
         baseUrl: "",
@@ -1256,7 +1657,7 @@ function seedData() {
         metaJson: JSON.stringify({ descriptionZh: "高品质 API 中转服务，稳定性极佳", descriptionEn: "High-quality API relay service with excellent stability." }),
       },
       {
-        id: "freegpt-hub",
+        slug: "freegpt-hub",
         name: "FreeGPT Hub",
         url: "freegpt.cc",
         baseUrl: "",
@@ -1277,7 +1678,7 @@ function seedData() {
         metaJson: JSON.stringify({ descriptionZh: "免费公益站，不保证稳定性", descriptionEn: "Free public platform with no stability guarantee." }),
       },
       {
-        id: "siliconflow",
+        slug: "siliconflow",
         name: "SiliconFlow",
         url: "siliconflow.cn",
         baseUrl: "",
@@ -1298,7 +1699,7 @@ function seedData() {
         metaJson: JSON.stringify({ descriptionZh: "国产模型聚合，性价比优秀", descriptionEn: "Great-value aggregation platform focused on domestic models." }),
       },
       {
-        id: "gpt-proxy-xyz",
+        slug: "gpt-proxy-xyz",
         name: "GPT-Proxy.xyz",
         url: "gpt-proxy.xyz",
         baseUrl: "",
@@ -1320,21 +1721,25 @@ function seedData() {
       },
     ];
 
-    for (const p of seedPlatforms) createPlatform(p);
+    const createdPlatforms = new Map<string, Platform>();
+    for (const p of seedPlatforms) {
+      const created = createPlatform(p);
+      createdPlatforms.set(created.slug, created);
+    }
 
-    replacePlatformAttributeValues("openrouter-pro", [
+    replacePlatformAttributeValues(createdPlatforms.get("openrouter-pro")!.id, [
       { groupKey: "route_type", optionValue: "global_route" },
       { groupKey: "payment_methods", optionValue: "crypto" },
     ]);
-    replacePlatformAttributeValues("freegpt-hub", [
+    replacePlatformAttributeValues(createdPlatforms.get("freegpt-hub")!.id, [
       { groupKey: "route_type", optionValue: "global_route" },
     ]);
-    replacePlatformAttributeValues("siliconflow", [
+    replacePlatformAttributeValues(createdPlatforms.get("siliconflow")!.id, [
       { groupKey: "route_type", optionValue: "cn_direct" },
       { groupKey: "payment_methods", optionValue: "alipay" },
       { groupKey: "payment_methods", optionValue: "wechat_pay" },
     ]);
-    replacePlatformAttributeValues("gpt-proxy-xyz", [
+    replacePlatformAttributeValues(createdPlatforms.get("gpt-proxy-xyz")!.id, [
       { groupKey: "route_type", optionValue: "global_route" },
       { groupKey: "payment_methods", optionValue: "crypto" },
     ]);

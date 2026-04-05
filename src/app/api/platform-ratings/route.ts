@@ -4,12 +4,17 @@ import { getCurrentUser } from "@/lib/auth";
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const platformId = searchParams.get("platformId");
+    const platformIdParam = searchParams.get("platformId");
 
     // If no platformId, return all summaries for the homepage
-    if (!platformId) {
+    if (!platformIdParam) {
       const summaries = getAllRatingSummaries();
       return Response.json({ success: true, data: summaries });
+    }
+
+    const platformId = Number(platformIdParam);
+    if (!Number.isInteger(platformId) || platformId <= 0) {
+      return Response.json({ success: false, error: "平台不存在" }, { status: 404 });
     }
 
     const ratings = getRatingsByPlatform(platformId);
@@ -27,8 +32,9 @@ export async function POST(request: Request) {
       return Response.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
-    const { platformId, score, comment } = await request.json();
-    if (!platformId || !score || score < 1 || score > 5) {
+    const { platformId: rawPlatformId, score, comment } = await request.json();
+    const platformId = Number(rawPlatformId);
+    if (!Number.isInteger(platformId) || platformId <= 0 || !score || score < 1 || score > 5) {
       return Response.json({ success: false, error: "评分无效（1-5 分）" }, { status: 400 });
     }
 

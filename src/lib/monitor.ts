@@ -109,7 +109,7 @@ export async function runMonitorCycle(): Promise<void> {
     }
   }
 
-  // Clean up old logs (older than 3 days)
+  // Clean up old logs based on the current retention window.
   const cleaned = cleanOldConnectivityLogs();
   if (cleaned > 0) {
     console.log(`[Monitor] Cleaned ${cleaned} old connectivity log(s).`);
@@ -157,11 +157,20 @@ export function stopMonitorLoop(): void {
 // ============================================================
 // Auto-start (skip during build)
 // ============================================================
-const isBuild =
-  process.env.NODE_ENV === "production" &&
-  !process.env.NEXT_RUNTIME;
+function isBuildRuntime() {
+  const lifecycleEvent = process.env.npm_lifecycle_event?.toLowerCase() || "";
+  const nextPhase = process.env.NEXT_PHASE?.toLowerCase() || "";
+  const argv = process.argv.join(" ").toLowerCase();
 
-if (!isBuild) {
+  return (
+    lifecycleEvent === "build" ||
+    nextPhase.includes("build") ||
+    Boolean(process.env.__NEXT_PRIVATE_BUILD_WORKER) ||
+    argv.includes("next build")
+  );
+}
+
+if (!isBuildRuntime()) {
   // Use a small delay to avoid blocking module initialization
   setTimeout(() => {
     startMonitorLoop();

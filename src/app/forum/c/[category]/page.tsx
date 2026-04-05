@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useMemo } from "react";
 import Link from "next/link";
 import { timeAgo } from "@/lib/utils";
 import { PixelAvatar } from "@/components/PixelAvatar";
@@ -50,6 +50,7 @@ export default function CategoryPage({
   const [totalPages, setTotalPages] = useState(1);
   const [sort, setSort] = useState<"latest" | "hot">("latest");
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<{ id: number; role: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/forum/categories")
@@ -60,6 +61,13 @@ export default function CategoryPage({
           if (cat) setCategory(cat);
         }
       });
+
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setUser(data.data);
+      })
+      .catch(() => {});
   }, [categoryId]);
 
   useEffect(() => {
@@ -83,6 +91,14 @@ export default function CategoryPage({
       cancelled = true;
     };
   }, [categoryId, page, sort]);
+
+  const canCreateTopic = useMemo(() => {
+    if (!category) return true;
+    if (user?.role === "admin") return true;
+    if (category.readOnly) return false;
+    if (category.id === "reviews") return false;
+    return true;
+  }, [category, user]);
 
   return (
     <main className="w-full py-8 space-y-6">
@@ -111,6 +127,11 @@ export default function CategoryPage({
                     官方板块 · 仅管理员可发帖
                   </span>
                 )}
+                {category?.id === "reviews" && !category?.readOnly && (
+                  <span className="text-[10px] text-amber-300 font-normal px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                    平台专帖模式 · 请进入对应平台帖子后回复
+                  </span>
+                )}
               </h1>
               <p className="text-sm text-muted mt-0.5">
                 {category?.description}
@@ -118,13 +139,19 @@ export default function CategoryPage({
             </div>
           </div>
         </div>
-        <Link
-          href={`/forum/new?category=${categoryId}`}
-          className="btn-glass btn-glass-primary shrink-0"
-        >
-          <PenSquare className="w-4 h-4" />
-          发帖
-        </Link>
+        {canCreateTopic ? (
+          <Link
+            href={`/forum/new?category=${categoryId}`}
+            className="btn-glass btn-glass-primary shrink-0"
+          >
+            <PenSquare className="w-4 h-4" />
+            发帖
+          </Link>
+        ) : (
+          <div className="rounded-xl border border-[var(--border-color)] bg-[var(--card)]/70 px-3 py-2 text-xs text-muted shrink-0">
+            {category?.id === "reviews" ? "请从平台页进入专属点评帖" : "当前板块不可直接发帖"}
+          </div>
+        )}
       </div>
 
       {/* Sort Controls */}

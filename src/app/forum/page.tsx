@@ -45,6 +45,8 @@ interface Topic {
   replyCount: number;
   tags: string[];
   createdAt: string;
+  updatedAt?: string;
+  lastReplyAt?: string | null;
   authorName?: string;
   categoryName?: string;
 }
@@ -87,7 +89,7 @@ export default function ForumHome() {
   useEffect(() => {
     Promise.all([
       fetch("/api/forum/categories").then((r) => r.json()),
-      fetch("/api/forum/topics?pageSize=15&sort=latest").then((r) => r.json()),
+      fetch("/api/forum/topics?pageSize=15&sort=latest&excludeCategory=reviews").then((r) => r.json()),
     ])
       .then(([catData, topicData]) => {
         if (catData.success) setCategories(catData.data);
@@ -202,7 +204,7 @@ export default function ForumHome() {
                     </span>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {timeAgo(topic.createdAt)}
+                      {timeAgo(topic.lastReplyAt || topic.updatedAt || topic.createdAt)}
                     </span>
                     {topic.tags.length > 0 && (
                       <div className="flex gap-1">

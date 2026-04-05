@@ -17,7 +17,6 @@ import {
   getBadgeClass,
   makeBadgeStyle,
   makeSoftTagStyle,
-  normalizeExternalUrl,
 } from "@/lib/discover-compare";
 
 const t = getMessages();
@@ -62,7 +61,7 @@ export default function DiscoverPage() {
   const [monitoredOnly, setMonitoredOnly] = useState(false);
   const [sortBy, setSortBy] = useState<"default" | "uptime" | "latency" | "billing">("default");
   const [selectedFilters, setSelectedFilters] = useState<Record<string, string[]>>({});
-  const [selectedCompareIds, setSelectedCompareIds] = useState<string[]>([]);
+  const [selectedCompareIds, setSelectedCompareIds] = useState<number[]>([]);
 
   useEffect(() => {
     Promise.all([fetch("/api/platforms"), fetch("/api/platforms/config")])
@@ -97,7 +96,7 @@ export default function DiscoverPage() {
   );
 
   const valuesByPlatform = useMemo(() => {
-    return config.values.reduce<Record<string, AttributeValue[]>>((acc, value) => {
+    return config.values.reduce<Record<number, AttributeValue[]>>((acc, value) => {
       acc[value.platformId] ??= [];
       acc[value.platformId].push(value);
       return acc;
@@ -141,7 +140,7 @@ export default function DiscoverPage() {
     });
   };
 
-  const toggleComparePlatform = (platformId: string) => {
+  const toggleComparePlatform = (platformId: number) => {
     setSelectedCompareIds((prev) => prev.includes(platformId) ? prev.filter((id) => id !== platformId) : [...prev, platformId]);
   };
 
@@ -155,7 +154,7 @@ export default function DiscoverPage() {
     return summary && summary.totalChecks > 0 ? summary.avgLatency : platform.latency;
   }, [connectivity]);
 
-  const getPlatformValues = useCallback((platformId: string, includeBound = true) => {
+  const getPlatformValues = useCallback((platformId: number, includeBound = true) => {
     const values = valuesByPlatform[platformId] || [];
     return values
       .filter((item) => (includeBound ? true : !boundGroupKeys.has(item.groupKey)))
@@ -171,7 +170,7 @@ export default function DiscoverPage() {
       });
   }, [valuesByPlatform, boundGroupKeys, config.groups, optionMap]);
 
-  const getSiteTagOption = (platformId: string) => {
+  const getSiteTagOption = (platformId: number) => {
     if (!siteTagGroup) return null;
     const value = (valuesByPlatform[platformId] || []).find((item) => item.groupKey === siteTagGroup.key);
     if (!value) return null;
@@ -330,6 +329,29 @@ export default function DiscoverPage() {
         )}
       </section>
 
+      {!compareDisabled && (
+        <button
+          type="button"
+          onClick={goToCompare}
+          className="fixed bottom-6 left-4 z-30 inline-flex items-center gap-2 rounded-full border border-[var(--accent)]/30 bg-[var(--card)]/95 px-3 py-2 text-xs font-semibold text-[var(--foreground)] shadow-lg shadow-[var(--accent)]/10 backdrop-blur transition hover:-translate-y-0.5 hover:border-[var(--accent)]/45 hover:shadow-xl lg:bottom-auto lg:top-1/2 lg:-translate-y-1/2"
+          title={t.discoverPage.compareAction}
+          aria-label={t.discoverPage.compareAction}
+        >
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
+            <ArrowRightLeft className="h-4 w-4" />
+          </span>
+          <span className="hidden sm:flex sm:flex-col sm:items-start sm:leading-tight">
+            <span>{t.discoverPage.compareAction}</span>
+            <span className="text-[10px] font-medium text-[var(--muted)]">
+              {t.discoverPage.compareSelectedCountPrefix}{selectedCompareIds.length}{t.discoverPage.compareSelectedCountSuffix}
+            </span>
+          </span>
+          <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-bold text-white sm:hidden">
+            {selectedCompareIds.length}
+          </span>
+        </button>
+      )}
+
       <section className="admin-card overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border-color)] px-6 py-5">
           <div>
@@ -459,10 +481,10 @@ export default function DiscoverPage() {
                       </td>
                       <td className="px-5 py-4 align-top text-right">
                         <div className="flex justify-end gap-2">
-                          <a href={normalizeExternalUrl(platform.url)} target="_blank" rel="noreferrer" className="btn-glass">
+                          <Link href={`/visit/${platform.id}`} className="btn-glass" target="_blank" rel="noopener noreferrer">
                             <ExternalLink className="h-3.5 w-3.5" />{t.common.visit}
-                          </a>
-                          <Link href={`/forum/tag/${platform.id}`} className="btn-glass btn-glass-primary">{t.common.review}</Link>
+                          </Link>
+                          <Link href={`/review/${platform.id}`} className="btn-glass btn-glass-primary">{t.common.review}</Link>
                         </div>
                       </td>
                     </tr>

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  Activity,
   ChevronDown,
   ChevronRight,
   LayoutDashboard,
@@ -48,6 +49,7 @@ export function Navbar() {
   const PRIMARY_NAV = [
     { label: t.common.home, href: "/", icon: LayoutDashboard, exact: true },
     { label: t.common.discover, href: "/discover", icon: Search },
+    { label: t.common.sks, href: "/sks", icon: Activity },
     { label: t.common.forum, href: "/forum", icon: MessageCircle },
     { label: t.common.welfare, href: "/forum/c/welfare", icon: Sparkles },
     { label: t.common.guide, href: "/forum/c/guide", icon: Shield },

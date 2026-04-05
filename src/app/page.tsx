@@ -7,9 +7,13 @@ import { Tracker, type TrackerBlockProps } from "@/components/Tracker";
 import { getMessages } from "@/lib/i18n";
 
 interface Platform {
-  id: string;
+  id: number;
+  slug: string;
+  reviewTopicId: number | null;
   name: string;
   url: string;
+  visitUrl?: string;
+  visitCount?: number;
   tag: "premium" | "free" | "stable" | "dead";
   tagLabel: string;
   billingRate: string;
@@ -24,7 +28,7 @@ interface Platform {
 
 interface ConnectivityLog {
   id: number;
-  platformId: string;
+  platformId: number;
   success: boolean;
   latency: number;
   errorMessage: string;
@@ -39,7 +43,7 @@ interface ConnectivitySummary {
 }
 
 interface ConnectivityData {
-  [platformId: string]: {
+  [platformId: number]: {
     logs: ConnectivityLog[];
     summary: ConnectivitySummary;
   };
@@ -62,7 +66,7 @@ interface AttributeOption {
 
 interface AttributeValue {
   id: number;
-  platformId: string;
+  platformId: number;
   groupKey: string;
   optionValue: string;
 }
@@ -166,7 +170,7 @@ export default function Home() {
     [config.groups]
   );
 
-  const getOtherTags = useCallback((platformId: string) => {
+  const getOtherTags = useCallback((platformId: number) => {
     return config.values
       .filter((value) => value.platformId === platformId && !hiddenGroupKeys.has(value.groupKey))
       .map((value) => {
@@ -179,7 +183,7 @@ export default function Home() {
       });
   }, [config.values, hiddenGroupKeys, optionMap]);
 
-  const getSiteTagOption = (platformId: string) => {
+  const getSiteTagOption = (platformId: number) => {
     if (!siteTagGroup) return null;
     const value = config.values.find((item) => item.platformId === platformId && item.groupKey === siteTagGroup.key);
     if (!value) return null;
@@ -311,7 +315,7 @@ export default function Home() {
                   key={platform.id}
                   className="home-featured-card flex h-auto cursor-pointer flex-col rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-5 shadow-sm transition-all duration-200"
                   onClick={() => setExpandedCards((prev) => ({ ...prev, [platform.id]: !prev[platform.id] }))}
-                  aria-expanded={expanded}
+                  data-expanded={expanded}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -358,17 +362,17 @@ export default function Home() {
                       <Tracker data={trackerData} className="h-4" hoverEffect={!!platform.monitorEnabled} />
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <a
-                        href={`https://${platform.url}`}
-                        target="_blank"
-                        rel="noreferrer"
+                      <Link
+                        href={`/visit/${platform.id}`}
                         className="btn-glass"
+                        target="_blank"
+                        rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                         {t.common.visit}
-                      </a>
-                      <Link href={`/forum/tag/${platform.id}`} className="btn-glass" onClick={(e) => e.stopPropagation()}>
+                      </Link>
+                      <Link href={`/review/${platform.id}`} className="btn-glass" onClick={(e) => e.stopPropagation()}>
                         <MessageSquare className="h-3.5 w-3.5" />
                         {t.common.review}
                       </Link>

@@ -105,7 +105,7 @@ function NewTopicForm() {
   const availableCategories =
     user.role === "admin"
       ? categories
-      : categories.filter((c) => !c.readOnly);
+      : categories.filter((c) => !c.readOnly && c.id !== "reviews");
 
   return (
     <main className="w-full py-8 space-y-6">
@@ -205,7 +205,13 @@ function NewTopicForm() {
           )}
         </div>
 
-        {/* Error */}
+        {user.role !== "admin" && categories.some((c) => c.id === "reviews") && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-300">
+            站点点评已改为平台专属点评帖模式，请从平台卡片上的“点评”按钮进入对应帖子后直接回复。
+          </div>
+        )}
+
+         {/* Error */}
         {error && (
           <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono">
             {error}

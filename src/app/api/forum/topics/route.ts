@@ -4,8 +4,15 @@ import { getCurrentUser } from "@/lib/auth";
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+    const excludeCategoryIds = searchParams
+      .getAll("excludeCategory")
+      .flatMap((value) => value.split(","))
+      .map((value) => value.trim())
+      .filter(Boolean);
+
     const result = getTopics({
       categoryId: searchParams.get("category") || undefined,
+      excludeCategoryIds: excludeCategoryIds.length > 0 ? excludeCategoryIds : undefined,
       tag: searchParams.get("tag") || undefined,
       page: Number(searchParams.get("page")) || 1,
       pageSize: Number(searchParams.get("pageSize")) || 20,
@@ -36,6 +43,12 @@ export async function POST(request: Request) {
     }
     if (category.readOnly && user.role !== "admin") {
       return Response.json({ success: false, error: "该板块仅管理员可发帖" }, { status: 403 });
+    }
+    if (data.categoryId === "reviews" && user.role !== "admin") {
+      return Response.json(
+        { success: false, error: "站点点评板块仅允许在平台专属点评帖下回复，不能直接发新帖" },
+        { status: 403 }
+      );
     }
 
     const topic = createTopic({

@@ -56,9 +56,10 @@ export async function POST(request: Request) {
     await requireAdmin();
 
     const data = await request.json();
-    const { id, name, url, tag, tagLabel, billingRate } = data;
+    const { slug, name, url, tag, tagLabel, billingRate } = data;
+    const visitUrl = String(data.visitUrl || "").trim();
 
-    if (!id || !name || !url || !tag || !tagLabel || !billingRate) {
+    if (!slug || !name || !url || !tag || !tagLabel || !billingRate) {
       return Response.json(
         { success: false, error: "缺少必填字段" },
         { status: 400 }
@@ -66,10 +67,11 @@ export async function POST(request: Request) {
     }
 
      const platform = createPlatform({
-       id,
+       slug: String(slug).trim(),
        name,
        url,
        baseUrl: data.baseUrl || "",
+       visitUrl,
        monitorEnabled: data.monitorEnabled || false,
        tag,
        tagLabel,
@@ -101,17 +103,19 @@ export async function PUT(request: Request) {
   try {
     await requireAdmin();
     const data = await request.json();
-    const { id } = data;
+    const id = Number(data.id);
 
-    if (!id) {
+    if (!Number.isInteger(id) || id <= 0) {
       return Response.json({ success: false, error: "缺少平台 id" }, { status: 400 });
     }
 
-     const platform = updatePlatform(id, {
-       name: data.name,
-       url: data.url,
-       baseUrl: data.baseUrl || "",
-       monitorEnabled: !!data.monitorEnabled,
+      const platform = updatePlatform(id, {
+        slug: String(data.slug || "").trim(),
+        name: data.name,
+        url: data.url,
+        baseUrl: data.baseUrl || "",
+        visitUrl: String(data.visitUrl || "").trim(),
+        monitorEnabled: !!data.monitorEnabled,
        tag: data.tag,
        tagLabel: data.tagLabel,
        billingRate: data.billingRate,
@@ -147,9 +151,9 @@ export async function DELETE(request: Request) {
   try {
     await requireAdmin();
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
+    const id = Number(searchParams.get("id"));
 
-    if (!id) {
+    if (!Number.isInteger(id) || id <= 0) {
       return Response.json({ success: false, error: "缺少平台 id" }, { status: 400 });
     }
 

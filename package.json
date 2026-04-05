@@ -1,12 +1,16 @@
 {
   "name": "sk-buy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sks:import": "node scripts/sks-import-sites-from-file.cjs",
+    "sks:report": "node scripts/sks-report.cjs",
+    "sks:sync-models": "node scripts/sks-site-action.cjs sync-models",
+    "sks:test-model": "node scripts/sks-site-action.cjs test-model"
   },
   "dependencies": {
     "@radix-ui/react-hover-card": "^1.1.15",

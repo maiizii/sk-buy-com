@@ -14,7 +14,6 @@ import {
   getBadgeClass,
   makeBadgeStyle,
   makeSoftTagStyle,
-  normalizeExternalUrl,
   parseBillingRateValue,
 } from "@/lib/discover-compare";
 
@@ -62,7 +61,10 @@ function ComparePageContent() {
 
   const selectedIds = useMemo(() => {
     const raw = searchParams.get("ids") || "";
-    return raw.split(",").map((item) => item.trim()).filter(Boolean);
+    return raw
+      .split(",")
+      .map((item) => Number(item.trim()))
+      .filter((item) => Number.isInteger(item) && item > 0);
   }, [searchParams]);
 
   const optionMap = useMemo(() => {
@@ -73,7 +75,7 @@ function ComparePageContent() {
   }, [config.options]);
 
   const valuesByPlatform = useMemo(() => {
-    return config.values.reduce<Record<string, AttributeValue[]>>((acc, value) => {
+    return config.values.reduce<Record<number, AttributeValue[]>>((acc, value) => {
       acc[value.platformId] ??= [];
       acc[value.platformId].push(value);
       return acc;
@@ -106,7 +108,7 @@ function ComparePageContent() {
     return summary && summary.totalChecks > 0 ? summary.avgLatency : platform.latency;
   }, [connectivity]);
 
-  const getSiteTagOption = useCallback((platformId: string) => {
+  const getSiteTagOption = useCallback((platformId: number) => {
     if (!siteTagGroup) return null;
     const value = (valuesByPlatform[platformId] || []).find((item) => item.groupKey === siteTagGroup.key);
     if (!value) return null;
@@ -122,7 +124,7 @@ function ComparePageContent() {
     return labels.length > 0 ? labels : platform.models;
   }, [featuredModelsGroup, valuesByPlatform, optionMap]);
 
-  const getGroupValueLabels = useCallback((platformId: string, groupKey: string) => {
+  const getGroupValueLabels = useCallback((platformId: number, groupKey: string) => {
     return (valuesByPlatform[platformId] || [])
       .filter((item) => item.groupKey === groupKey)
       .map((item) => optionMap[`${item.groupKey}:${item.optionValue}`]?.label || item.optionValue || item.valueText)
@@ -156,11 +158,11 @@ function ComparePageContent() {
               <p className="break-all text-xs text-[var(--muted)]">{platform.url}</p>
               <p className="text-sm leading-6 text-[var(--muted)]">{platform.description || t.common.noData}</p>
               <div className="flex flex-wrap gap-2 pt-1">
-                <a href={normalizeExternalUrl(platform.url)} target="_blank" rel="noreferrer" className="btn-glass">
+                <Link href={`/visit/${platform.id}`} className="btn-glass" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="h-3.5 w-3.5" />
                   {t.common.visit}
-                </a>
-                <Link href={`/forum/tag/${platform.id}`} className="btn-glass btn-glass-primary">
+                </Link>
+                <Link href={`/review/${platform.id}`} className="btn-glass btn-glass-primary">
                   {t.common.review}
                 </Link>
               </div>
