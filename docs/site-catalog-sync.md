@@ -52,6 +52,18 @@
 - 有 `apiKey` 时自动同步入 `sks.db`
 - 可选首轮探测 `runInitialProbe`
 
+### 4. 前台接入现状
+
+前台核心页面已经完成对新目录链路的接入：
+
+- 首页 `src/app/page.tsx` 已切到 `/api/sites`
+- discover `src/app/discover/page.tsx` 已切到 `/api/sites`
+- compare `src/app/compare/page.tsx` 已切到 `/api/sites`
+- 首页 / discover / compare 的 SKS 关键指标展示已基本统一为：
+  - 站点状态文案：「7天 xx%正常 / 平均延迟 xxms」
+  - 模型支持悬浮状态浮层
+  - 浮层中直接展示 24 格状态条
+
 ---
 
 ## 推荐导入 Payload
@@ -134,8 +146,14 @@ node .\shared\push-site-catalog.mjs --file .\payload.json
 
 ## 下一阶段清单
 
-1. 将首页 / discover / compare 逐步切到 `/api/sites`
-2. 设计 legacy `platforms` → `site-catalog` 的迁移脚本
-3. 用 SKS 历史数据自动反推：状态标签、推荐标签、模型供应商族
-4. 在 `sk-buy-tools` 中补齐统一 proxy / payload 输出 / 自动推送流水
-5. 只保留人工 override：站长认证、隐藏/下线、争议处理
+> 首页 / discover / compare 已完成切换到 `/api/sites`，下一阶段不再重复做前台主数据切换，而是回到剩余验证与 legacy 退场收口。
+
+1. 优先回补第 1 阶段剩余验证：
+   - `admin/sks/sites` 管理态导入链路端到端验证
+   - `runInitialProbe` 首轮真实探测验证
+2. 盘点 legacy `platforms`、`platform_attribute_*`、`platform_models`、`connectivity_logs` 的真实依赖
+3. 设计 `platforms` → `site-catalog` 的迁移脚本与 `platformId` → hostname 映射方案
+4. 为 `review / forum review / visit` 等 legacy 页面保留 hostname 级别过渡兼容
+5. 用 SKS 历史数据自动反推：状态标签、推荐标签、模型供应商族
+6. 在 `sk-buy-tools` 中补齐统一 proxy / payload 输出 / 自动推送流水
+7. 最终只保留人工 override：站长认证、隐藏/下线、争议处理
