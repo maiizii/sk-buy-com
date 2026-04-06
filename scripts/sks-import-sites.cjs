@@ -91,6 +91,120 @@ function safeParseJson(value) {
   }
 }
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function toNonEmptyString(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function buildPublicUrl(baseUrl, pathname) {
+  return new URL(pathname, `${String(baseUrl || "").replace(/\/+$/, "")}/`).toString();
+}
+
+function looksLikeNewApiStatus(payload) {
+  if (!isRecord(payload) || payload.success !== true || !isRecord(payload.data)) {
+    return false;
+  }
+
+  const data = payload.data;
+  return (
+    data.system_name !== undefined ||
+    data.email_verification !== undefined ||
+    data.demo_site_enabled !== undefined ||
+    data.self_use_mode_enabled !== undefined
+  );
+}
+
+function looksLikeSub2ApiPublicSettings(payload) {
+  if (!isRecord(payload) || payload.code !== 0 || !isRecord(payload.data)) {
+    return false;
+  }
+
+  const data = payload.data;
+  return (
+    data.site_name !== undefined ||
+    data.registration_enabled !== undefined ||
+    data.email_verify_enabled !== undefined
+  );
+}
+
+async function detectSitePublicMeta(apiBaseUrl) {
+  const normalizedBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  if (!normalizedBaseUrl) {
+    return { displayName: null, siteSystem: "unknown" };
+  }
+
+  const [statusResult, settingsResult] = await Promise.all([
+    timedFetch(buildPublicUrl(normalizedBaseUrl, "/api/status"), {
+      method: "GET",
+      headers: { Accept: "application/json, text/plain, */*" },
+    }),
+    timedFetch(buildPublicUrl(normalizedBaseUrl, "/api/v1/settings/public"), {
+      method: "GET",
+      headers: { Accept: "application/json, text/plain, */*" },
+    }),
+  ]);
+
+  if (looksLikeNewApiStatus(statusResult.responseJson)) {
+    return {
+      displayName: toNonEmptyString(statusResult.responseJson.data.system_name),
+      siteSystem: "newapi",
+    };
+  }
+
+  if (looksLikeSub2ApiPublicSettings(settingsResult.responseJson)) {
+    return {
+      displayName: toNonEmptyString(settingsResult.responseJson.data.site_name),
+      siteSystem: "sub2api",
+    };
+  }
+
+  return {
+    displayName: null,
+    siteSystem: "unknown",
+  };
+}
+
+function isHostnameLikeDisplayName(displayName, apiBaseUrl) {
+  const normalizedDisplayName = toNonEmptyString(displayName);
+  if (!normalizedDisplayName) return true;
+
+  const hostname = normalizeHostname(apiBaseUrl).toLowerCase();
+  const normalizedBaseUrl = normalizeApiBaseUrl(apiBaseUrl).toLowerCase();
+  const loweredDisplayName = normalizedDisplayName.toLowerCase();
+
+  if (loweredDisplayName === hostname || loweredDisplayName === normalizedBaseUrl) {
+    return true;
+  }
+
+  const displayHostname = normalizeHostname(normalizedDisplayName).toLowerCase();
+  if (displayHostname === hostname) {
+    return true;
+  }
+
+  const displayUrl = normalizeApiBaseUrl(normalizedDisplayName).toLowerCase();
+  return Boolean(displayUrl) && displayUrl === normalizedBaseUrl;
+}
+
+function resolveImportedSiteDisplayName(input) {
+  const manualDisplayName = toNonEmptyString(input.displayName);
+  if (manualDisplayName && !isHostnameLikeDisplayName(manualDisplayName, input.apiBaseUrl)) {
+    return manualDisplayName;
+  }
+
+  return (
+    toNonEmptyString(input.detectedDisplayName) ||
+    manualDisplayName ||
+    normalizeHostname(input.apiBaseUrl) ||
+    normalizeApiBaseUrl(input.apiBaseUrl) ||
+    String(input.apiBaseUrl || "").trim()
+  );
+}
+
 function extractErrorMessage(payload, fallback) {
   if (payload && typeof payload === "object") {
     const record = payload;
@@ -667,20 +781,30 @@ async function testModelForSite(db, site, credentialId, apiKey, modelName) {
 }
 
 async function importSite(db, input) {
-  const siteId = upsertSite(db, input);
-  const credentialId = upsertCredential(db, siteId, input);
+  const detectedPublicMeta = await detectSitePublicMeta(input.apiBaseUrl);
+  const resolvedInput = {
+    ...input,
+    displayName: resolveImportedSiteDisplayName({
+      displayName: input.displayName,
+      detectedDisplayName: detectedPublicMeta.displayName,
+      apiBaseUrl: input.apiBaseUrl,
+    }),
+  };
+
+  const siteId = upsertSite(db, resolvedInput);
+  const credentialId = upsertCredential(db, siteId, resolvedInput);
   const site = db.prepare("SELECT id, hostname, normalizedHostname, displayName, homepageUrl, apiBaseUrl, statusVisibility FROM sks_sites WHERE id = ?").get(siteId);
 
-  const modelSync = await syncModelsForSite(db, site, credentialId, input.apiKey);
+  const modelSync = await syncModelsForSite(db, site, credentialId, resolvedInput.apiKey);
   const fallbackModels = listCurrentModels(db, siteId);
   const modelsToTest = chooseHotModels(
-    input.forceModels.length > 0 ? input.forceModels : (modelSync.models.length > 0 ? modelSync.models : fallbackModels),
-    input.modelLimit
+    resolvedInput.forceModels.length > 0 ? resolvedInput.forceModels : (modelSync.models.length > 0 ? modelSync.models : fallbackModels),
+    resolvedInput.modelLimit
   );
 
   const testedModels = [];
   for (const modelName of modelsToTest) {
-    const probe = await testModelForSite(db, site, credentialId, input.apiKey, modelName);
+    const probe = await testModelForSite(db, site, credentialId, resolvedInput.apiKey, modelName);
     testedModels.push({
       modelName,
       status: probe.status,

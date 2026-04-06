@@ -595,6 +595,9 @@ if (!hasColumn("users", "displayName")) {
 if (!hasColumn("forum_topics", "platformId")) {
   db.exec(`ALTER TABLE forum_topics ADD COLUMN platformId INTEGER`);
 }
+if (!hasColumn("forum_topics", "siteKey")) {
+  db.exec(`ALTER TABLE forum_topics ADD COLUMN siteKey TEXT`);
+}
 if (!hasColumn("users", "emailVerified")) {
   db.exec(`ALTER TABLE users ADD COLUMN emailVerified INTEGER DEFAULT 0`);
 }
@@ -638,6 +641,7 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user ON email_
 db.exec(`CREATE INDEX IF NOT EXISTS idx_connectivity_logs_platform_time ON connectivity_logs(platformId, checkedAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_topics_category ON forum_topics(categoryId, createdAt DESC)`);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_forum_topics_platform_unique ON forum_topics(platformId) WHERE platformId IS NOT NULL`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_forum_topics_site_key_unique ON forum_topics(siteKey) WHERE siteKey IS NOT NULL`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_forum_replies_topic ON forum_replies(topicId, createdAt ASC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_ratings_platform ON platform_ratings(platformId)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_attribute_values_platform ON platform_attribute_values(platformId, groupKey)`);

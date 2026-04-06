@@ -1,6 +1,5 @@
 import { requireAdmin } from "@/lib/auth";
-import { importSksSiteWithCredential } from "@/lib/sks/db";
-import { runSksFullProbe } from "@/lib/sks/probe";
+import { importSiteCatalogEntry } from "@/lib/site-catalog/service";
 import { getSksAdminList } from "@/lib/sks/service";
 
 export const dynamic = "force-dynamic";
@@ -40,51 +39,55 @@ export async function POST(request: Request) {
       );
     }
 
-    const imported = importSksSiteWithCredential({
+    const imported = await importSiteCatalogEntry({
       displayName: body.displayName,
       homepageUrl: body.homepageUrl,
       apiBaseUrl,
-      apiKey,
+      siteSystem: body.siteSystem,
       platformType: body.platformType,
-      statusVisibility: body.statusVisibility,
+      sourceStage: body.sourceStage || "website",
+      sourceModule: body.sourceModule || "admin",
+      visibility: body.visibility || body.statusVisibility,
+      catalogStatus: body.catalogStatus,
+      summary: body.summary,
+      description: body.description,
+      registrationOpen: typeof body.registrationOpen === "boolean" ? body.registrationOpen : undefined,
+      emailVerificationRequired:
+        typeof body.emailVerificationRequired === "boolean" ? body.emailVerificationRequired : undefined,
+      inviteCodeRequired: typeof body.inviteCodeRequired === "boolean" ? body.inviteCodeRequired : undefined,
+      hasInitialQuota: typeof body.hasInitialQuota === "boolean" ? body.hasInitialQuota : undefined,
+      tags: Array.isArray(body.tags) ? body.tags.map((item: unknown) => String(item).trim()).filter(Boolean) : undefined,
+      meta: body.meta && typeof body.meta === "object" ? body.meta : undefined,
+      manualOverrides:
+        body.manualOverrides && typeof body.manualOverrides === "object" ? body.manualOverrides : undefined,
       ownershipStatus: body.ownershipStatus,
       ownerUserId: typeof body.ownerUserId === "number" ? body.ownerUserId : null,
       createdByUserId: typeof body.createdByUserId === "number" ? body.createdByUserId : null,
+      apiKey,
       sourceType: body.sourceType,
       submittedByUserId: typeof body.submittedByUserId === "number" ? body.submittedByUserId : null,
       label: body.label,
       isEnabled: body.isEnabled !== false,
       priorityScore: typeof body.priorityScore === "number" ? body.priorityScore : undefined,
+      runInitialProbe: body.runInitialProbe !== false,
+      initialProbeModelLimit:
+        typeof body.modelLimit === "number" && Number.isFinite(body.modelLimit)
+          ? body.modelLimit
+          : 3,
+      forceModels: Array.isArray(body.forceModels)
+        ? body.forceModels.map((item: unknown) => String(item).trim()).filter(Boolean)
+        : undefined,
     });
-
-    const shouldRunInitialProbe = body.runInitialProbe !== false;
-    let initialProbe: Awaited<ReturnType<typeof runSksFullProbe>> | null = null;
-    let probeError: string | null = null;
-
-    if (shouldRunInitialProbe) {
-      try {
-        initialProbe = await runSksFullProbe(imported.site.normalizedHostname, {
-          credentialId: imported.credential.id,
-          modelLimit:
-            typeof body.modelLimit === "number" && Number.isFinite(body.modelLimit)
-              ? body.modelLimit
-              : 3,
-          forceModels: Array.isArray(body.forceModels)
-            ? body.forceModels.map((item: unknown) => String(item).trim()).filter(Boolean)
-            : undefined,
-        });
-      } catch (error) {
-        probeError = error instanceof Error ? error.message : "首次探测失败";
-      }
-    }
 
     return createJsonResponse(
       {
         success: true,
         data: {
-          ...imported,
-          initialProbe,
-          probeError,
+          site: imported.sksImport?.site || null,
+          credential: imported.sksImport?.credential || null,
+          catalogSite: imported.catalogSite,
+          initialProbe: imported.initialProbe,
+          probeError: imported.probeError,
         },
       },
       { status: 201 }

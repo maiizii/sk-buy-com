@@ -147,6 +147,7 @@ export interface SksSiteCardView {
   models: {
     count: number;
     hot: string[];
+    all: string[];
   };
   stats7d: SksProbeStats;
   grid: SksGridCell[];

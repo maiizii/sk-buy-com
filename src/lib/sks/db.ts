@@ -302,7 +302,7 @@ function resolveSiteUpsert(input: SksSiteImportInput) {
   return {
     hostname,
     normalizedHostname: hostname,
-    displayName: input.displayName?.trim() || hostname,
+    displayName: input.displayName?.trim() || "",
     homepageUrl,
     apiBaseUrl,
     platformType: input.platformType?.trim() || "openai-compatible",
@@ -398,7 +398,7 @@ export function upsertSksSite(input: SksSiteImportInput) {
     ).run(
       payload.hostname,
       payload.normalizedHostname,
-      payload.displayName,
+      payload.displayName || existing.displayName || payload.hostname,
       payload.homepageUrl,
       payload.apiBaseUrl,
       payload.platformType,
@@ -423,7 +423,7 @@ export function upsertSksSite(input: SksSiteImportInput) {
     siteId,
     payload.hostname,
     payload.normalizedHostname,
-    payload.displayName,
+    payload.displayName || payload.hostname,
     payload.homepageUrl,
     payload.apiBaseUrl,
     payload.platformType,

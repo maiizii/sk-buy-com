@@ -1,5 +1,7 @@
 import db from "./db";
 import { clearPlatformReviewTopicId, getAllPlatforms, getPlatformById, setPlatformReviewTopicId, type User } from "./db";
+import { getSiteCatalogSiteByHostname } from "./site-catalog/db";
+import { normalizeHostname } from "./sks/utils";
 
 // ============================================================
 // Forum Category Types & Operations
@@ -102,6 +104,7 @@ export interface ForumTopic {
   id: number;
   categoryId: string;
   platformId: number | null;
+  siteKey: string | null;
   authorId: number;
   title: string;
   content: string;
@@ -123,6 +126,7 @@ interface ForumTopicRow {
   id: number;
   categoryId: string;
   platformId: number | null;
+  siteKey: string | null;
   authorId: number;
   title: string;
   content: string;
@@ -259,6 +263,24 @@ export function getTopicByPlatformId(platformId: number): ForumTopic | null {
   return row ? rowToTopic(row) : null;
 }
 
+export function getTopicBySiteKey(siteKey: string): ForumTopic | null {
+  const normalizedKey = normalizeHostname(siteKey);
+  if (!normalizedKey) return null;
+
+  const row = db
+    .prepare(
+      `SELECT t.*, u.username as authorName, c.name as categoryName
+       FROM forum_topics t
+       LEFT JOIN users u ON t.authorId = u.id
+       LEFT JOIN forum_categories c ON t.categoryId = c.id
+       WHERE t.siteKey = ?
+       LIMIT 1`
+    )
+    .get(normalizedKey) as ForumTopicRow | undefined;
+
+  return row ? rowToTopic(row) : null;
+}
+
 function getPlatformReviewAuthorId(): number | null {
   const adminRow = db
     .prepare(`SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1`)
@@ -319,9 +341,49 @@ export function ensurePlatformReviewTopic(platformId: number): ForumTopic | null
   }
 }
 
+export function ensureSiteReviewTopic(siteKey: string): ForumTopic | null {
+  const normalizedKey = normalizeHostname(siteKey);
+  if (!normalizedKey) return null;
+
+  const existing = getTopicBySiteKey(normalizedKey);
+  if (existing) return existing;
+
+  const site = getSiteCatalogSiteByHostname(normalizedKey);
+  if (!site) return null;
+
+  const reviewCategory = getCategoryById("reviews");
+  if (!reviewCategory) return null;
+
+  const authorId = getPlatformReviewAuthorId();
+  if (!authorId) return null;
+
+  const title = site.displayName.trim() || site.hostname || normalizedKey;
+  const content = [
+    site.summary || site.description || `${title} 站点评价讨论帖`,
+    site.homepageUrl ? `官网：${site.homepageUrl}` : "",
+    site.apiBaseUrl ? `API：${site.apiBaseUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  try {
+    return createTopic({
+      categoryId: reviewCategory.id,
+      siteKey: normalizedKey,
+      authorId,
+      title,
+      content,
+      tags: [],
+    });
+  } catch {
+    return getTopicBySiteKey(normalizedKey);
+  }
+}
+
 export function createTopic(data: {
   categoryId: string;
   platformId?: number | null;
+  siteKey?: string | null;
   authorId: number;
   title: string;
   content: string;
@@ -330,12 +392,13 @@ export function createTopic(data: {
   const now = new Date().toISOString();
   const result = db
     .prepare(
-      `INSERT INTO forum_topics (categoryId, platformId, authorId, title, content, tags, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO forum_topics (categoryId, platformId, siteKey, authorId, title, content, tags, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       data.categoryId,
       data.platformId || null,
+      data.siteKey || null,
       data.authorId,
       data.title,
       data.content,

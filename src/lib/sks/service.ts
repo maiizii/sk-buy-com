@@ -113,6 +113,17 @@ function buildProbeStats(probes: SksProbeResultRecord[]): SksProbeStats {
   };
 }
 
+function resolveGridWindowEnd(probes: SksProbeResultRecord[]) {
+  const latestProbeTimestamp = probes.reduce((latest, probe) => {
+    const timestamp = getProbeTimestamp(probe);
+    return timestamp > latest ? timestamp : latest;
+  }, 0);
+
+  return latestProbeTimestamp > 0
+    ? floorToUtcHour(new Date(latestProbeTimestamp))
+    : floorToUtcHour(new Date());
+}
+
 function buildGrid(probes: SksProbeResultRecord[], hours: number = SKS_GRID_HOURS): SksGridCell[] {
   const bucketMap = new Map<string, SksProbeResultRecord>();
 
@@ -123,7 +134,7 @@ function buildGrid(probes: SksProbeResultRecord[], hours: number = SKS_GRID_HOUR
     bucketMap.set(bucketKey, pickBucketProbe(bucketMap.get(bucketKey), probe));
   }
 
-  const end = floorToUtcHour(new Date());
+  const end = resolveGridWindowEnd(probes);
   const start = addUtcHours(end, -(hours - 1));
 
   return Array.from({ length: hours }, (_, index) => {
@@ -188,7 +199,8 @@ function buildSiteCardView(site: SksSiteRecord): SksSiteCardView {
     current: toStatusSnapshot(probes[0]),
     models: {
       count: models.length,
-      hot: resolveHotModels(models).slice(0, 6),
+      hot: resolveHotModels(models).slice(0, 10),
+      all: models.map((model) => model.modelName),
     },
     stats7d: buildProbeStats(probes),
     grid: buildGrid(probes),

@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
         hostname: "api.dicebear.com",
         pathname: "/9.x/pixel-art/png",
       },
+      {
+        protocol: "https",
+        hostname: "cdn.jsdelivr.net",
+        pathname: "/npm/@lobehub/icons-static-png@1.85.0/**",
+      },
     ],
   },
 };

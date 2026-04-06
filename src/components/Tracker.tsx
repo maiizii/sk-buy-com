@@ -11,7 +11,10 @@ interface TrackerBlockProps {
   color?: string;
   tooltip?: string;
   hoverEffect?: boolean;
+  hoverClassName?: string;
   defaultBackgroundColor?: string;
+  disableTooltip?: boolean;
+  disableTooltips?: boolean;
 }
 
 const Block = ({
@@ -19,20 +22,29 @@ const Block = ({
   tooltip,
   defaultBackgroundColor,
   hoverEffect,
+  hoverClassName,
+  disableTooltip,
+  disableTooltips,
 }: TrackerBlockProps) => {
+  const blockNode = (
+    <div className="size-full overflow-hidden px-[0.5px] transition first:rounded-l-[4px] first:pl-0 last:rounded-r-[4px] last:pr-0 sm:px-px">
+      <div
+        className={cx(
+          "size-full rounded-[1px]",
+          color || defaultBackgroundColor,
+          hoverEffect ? hoverClassName || "hover:opacity-50" : ""
+        )}
+      />
+    </div>
+  );
+
+  if (!tooltip || disableTooltip || disableTooltips) {
+    return blockNode;
+  }
+
   return (
     <HoverCardPrimitives.Root openDelay={60} closeDelay={40}>
-      <HoverCardPrimitives.Trigger asChild>
-        <div className="size-full overflow-hidden px-[0.5px] transition first:rounded-l-[4px] first:pl-0 last:rounded-r-[4px] last:pr-0 sm:px-px">
-          <div
-            className={cx(
-              "size-full rounded-[1px]",
-              color || defaultBackgroundColor,
-              hoverEffect ? "hover:opacity-50" : ""
-            )}
-          />
-        </div>
-      </HoverCardPrimitives.Trigger>
+      <HoverCardPrimitives.Trigger asChild>{blockNode}</HoverCardPrimitives.Trigger>
       <HoverCardPrimitives.Portal>
         <HoverCardPrimitives.Content
           sideOffset={10}
@@ -59,17 +71,23 @@ interface TrackerProps extends React.HTMLAttributes<HTMLDivElement> {
   data: TrackerBlockProps[];
   defaultBackgroundColor?: string;
   hoverEffect?: boolean;
+  hoverClassName?: string;
+  disableTooltip?: boolean;
+  disableTooltips?: boolean;
 }
 
 const Tracker = React.forwardRef<HTMLDivElement, TrackerProps>(
   (
-    {
-      data = [],
-      defaultBackgroundColor = "bg-gray-400 dark:bg-gray-400",
-      className,
-      hoverEffect,
-      ...props
-    },
+      {
+        data = [],
+        defaultBackgroundColor = "bg-gray-400 dark:bg-gray-400",
+        className,
+        hoverEffect,
+        hoverClassName,
+        disableTooltip,
+        disableTooltips,
+        ...props
+      },
     forwardedRef
   ) => {
     return (
@@ -78,12 +96,14 @@ const Tracker = React.forwardRef<HTMLDivElement, TrackerProps>(
         className={cx("group flex h-8 w-full items-center", className)}
         {...props}
       >
-        {data.map((props, index) => (
+        {data.map(({ key, ...blockProps }, index) => (
           <Block
-            key={props.key ?? index}
+            key={key ?? index}
             defaultBackgroundColor={defaultBackgroundColor}
             hoverEffect={hoverEffect}
-            {...props}
+            hoverClassName={hoverClassName}
+            disableTooltip={disableTooltip ?? disableTooltips}
+            {...blockProps}
           />
         ))}
       </div>

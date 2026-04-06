@@ -5,6 +5,17 @@ export const SKS_RETENTION_DAYS = 7;
 export const SKS_RETENTION_HOURS = SKS_RETENTION_DAYS * 24;
 export const SKS_SLOW_THRESHOLD_MS = 1500;
 
+function isIpAddress(hostname: string) {
+  const normalized = hostname.trim().replace(/^\[/, "").replace(/\]$/, "");
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(normalized) || normalized.includes(":");
+}
+
+function isSupportedSiteHostname(hostname: string) {
+  const normalized = hostname.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized === "localhost" || normalized.includes(".") || isIpAddress(normalized);
+}
+
 export function ensureAbsoluteUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -18,6 +29,13 @@ export function normalizeApiBaseUrl(value: string) {
 
   try {
     const url = new URL(absolute);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+    if (!isSupportedSiteHostname(url.hostname)) {
+      return "";
+    }
+
     url.username = "";
     url.password = "";
     url.search = "";
@@ -29,7 +47,7 @@ export function normalizeApiBaseUrl(value: string) {
 
     return url.toString().replace(/\/+$/, "");
   } catch {
-    return absolute.replace(/\/(chat\/completions|responses|models)\/?$/i, "").replace(/\/+$/, "");
+    return "";
   }
 }
 
@@ -135,18 +153,66 @@ export function dedupeStrings(values: string[]) {
   return result;
 }
 
-function getModelPriority(modelName: string) {
-  const normalized = modelName.toLowerCase();
+function normalizeModelNameForMatching(modelName: string) {
+  return modelName
+    .toLowerCase()
+    .replace(/[_.:/]+/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  if (/(embedding|bge|rerank|whisper|tts|speech|image|sdxl|stable-diffusion|midjourney|mj)/i.test(normalized)) {
-    return 50;
+function getModelPriority(modelName: string) {
+  const raw = modelName.toLowerCase();
+  const normalized = normalizeModelNameForMatching(modelName);
+  const padded = ` ${normalized} `;
+
+  if (/\b(embedding|bge|rerank|whisper|tts|speech|transcription|sdxl|stable diffusion|midjourney|mj|moderation)\b/i.test(padded)) {
+    return 60;
   }
-  if (/gpt-4\.1|gpt-4o|claude-3\.7|claude-3\.5|gemini-2\.5|gemini-2\.0|deepseek-r1|deepseek-v3/i.test(normalized)) {
+
+  if (/\b(haiku|mini|nano|lite)\b/i.test(padded)) {
+    return 25;
+  }
+
+  if (
+    /\bgpt[-_. ]?5\b|\bgpt[-_. ]?4o\b|\bgpt[-_. ]?4\.1\b|\bo1\b|\bo3\b|\bo4\b/i.test(raw) ||
+    (/\bcodex\b/i.test(raw) && /\bgpt\b/i.test(raw))
+  ) {
     return 0;
   }
-  if (/gpt|claude|gemini|deepseek|qwen|glm|llama|o1|o3|o4/i.test(normalized)) {
+
+  if (/\bclaude\b/i.test(raw) && /\b(opus|sonnet)\b/i.test(padded)) {
+    return 0;
+  }
+
+  if (
+    /\bgemini[-_. ]?2(?:[-_. ]?5|[-_. ]?0)?\b/i.test(raw) &&
+    /\b(pro|flash|exp|thinking)\b/i.test(padded)
+  ) {
+    return 0;
+  }
+
+  if (/\bdeepseek\b/i.test(raw) && /\b(r1|v3)\b/i.test(padded)) {
+    return 0;
+  }
+
+  if (/\bqwen\b/i.test(raw) && /\b(max|coder|reasoner|qwq|3|2 5)\b/i.test(padded)) {
+    return 5;
+  }
+
+  if (/\bglm\b/i.test(raw) && /\b4\b/i.test(padded)) {
+    return 5;
+  }
+
+  if (/\bllama\b/i.test(raw) && /\b(4|405b|90b|70b)\b/i.test(padded)) {
+    return 5;
+  }
+
+  if (/\b(gpt|claude|gemini|deepseek|qwen|glm|llama|o1|o3|o4)\b/i.test(padded)) {
     return 10;
   }
+
   return 20;
 }
 

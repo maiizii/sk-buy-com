@@ -4,8 +4,8 @@ import {
   SKS_GRID_HOURS,
   SKS_RETENTION_DAYS,
   getRecentFailureMessages,
-  getSksSiteByKey,
 } from "@/lib/sks/service";
+import { getPublicSiteCatalogDetail } from "@/lib/site-catalog/service";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +15,11 @@ export async function GET(
 ) {
   try {
     const { siteKey } = await params;
-    const detail = getSksSiteByKey(siteKey);
+    const detail = getPublicSiteCatalogDetail(siteKey);
 
     if (!detail) {
       return Response.json(
-        { success: false, error: "站点状态不存在" },
+        { success: false, error: "站点目录详情不存在" },
         { status: 404 }
       );
     }
@@ -32,13 +32,13 @@ export async function GET(
       },
       data: {
         ...detail,
-        recentFailures: getRecentFailureMessages(detail),
+        recentFailures: detail.sksDetail ? getRecentFailureMessages(detail.sksDetail) : [],
       },
     });
   } catch (error) {
-    console.error("[api/sks/site] failed:", error);
+    console.error("[api/site] failed:", error);
     return Response.json(
-      { success: false, error: "获取 SKS 站点详情失败" },
+      { success: false, error: "获取站点目录详情失败" },
       { status: 500 }
     );
   }
