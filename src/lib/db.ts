@@ -110,6 +110,8 @@ function migrateLegacyPlatformSchema() {
       ALTER TABLE platform_ratings RENAME TO platform_ratings_legacy;
     `);
 
+    const legacyForumTopicsHasPlatformId = hasColumn("forum_topics_legacy", "platformId");
+
     db.exec(`
       CREATE TABLE platforms (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -302,10 +304,10 @@ function migrateLegacyPlatformSchema() {
         viewCount, replyCount, lastReplyAt, lastReplyBy, tags, createdAt, updatedAt
       )
       SELECT
-        ft.id, ft.categoryId, p.id, ft.authorId, ft.title, ft.content, ft.pinned, ft.locked,
+        ft.id, ft.categoryId, ${legacyForumTopicsHasPlatformId ? "p.id" : "NULL"}, ft.authorId, ft.title, ft.content, ft.pinned, ft.locked,
         ft.viewCount, ft.replyCount, ft.lastReplyAt, ft.lastReplyBy, ft.tags, ft.createdAt, ft.updatedAt
       FROM forum_topics_legacy ft
-      LEFT JOIN platforms p ON p.slug = ft.platformId;
+      ${legacyForumTopicsHasPlatformId ? "LEFT JOIN platforms p ON p.slug = ft.platformId" : ""};
 
       INSERT INTO platform_ratings (
         id, platformId, userId, score, comment, createdAt
