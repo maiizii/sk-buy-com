@@ -368,3 +368,69 @@ export function markSiteCatalogSksSynced(hostname: string, syncedAt: string = to
 
   return getSiteCatalogSiteByHostname(normalizedHostname);
 }
+
+export function updateSiteCatalogSiteByHostname(
+  siteKey: string,
+  input: {
+    displayName?: string;
+    homepageUrl?: string | null;
+    apiBaseUrl?: string;
+    visibility?: SiteCatalogVisibility;
+    catalogStatus?: SiteCatalogStatus;
+  }
+) {
+  const existing = getSiteCatalogSiteByHostname(siteKey);
+  if (!existing) return null;
+
+  const now = toDbTimestamp();
+  const nextDisplayName =
+    input.displayName !== undefined ? String(input.displayName || "").trim() || existing.displayName : existing.displayName;
+  const nextHomepageUrl =
+    input.homepageUrl !== undefined
+      ? input.homepageUrl
+        ? normalizeApiBaseUrl(String(input.homepageUrl).trim())
+        : null
+      : existing.homepageUrl;
+  const nextApiBaseUrl =
+    input.apiBaseUrl !== undefined
+      ? normalizeApiBaseUrl(String(input.apiBaseUrl || "").trim())
+      : existing.apiBaseUrl;
+
+  if (!nextApiBaseUrl) {
+    throw new Error("apiBaseUrl 无效");
+  }
+
+  const nextVisibility = normalizeVisibility(input.visibility, existing.visibility);
+  const nextCatalogStatus = normalizeCatalogStatus(input.catalogStatus, existing.catalogStatus);
+
+  db.prepare(
+    `UPDATE site_catalog_sites
+     SET displayName = ?,
+         homepageUrl = ?,
+         apiBaseUrl = ?,
+         visibility = ?,
+         catalogStatus = ?,
+         updatedAt = ?
+     WHERE normalizedHostname = ? OR hostname = ?`
+  ).run(
+    nextDisplayName,
+    nextHomepageUrl,
+    nextApiBaseUrl,
+    nextVisibility,
+    nextCatalogStatus,
+    now,
+    existing.normalizedHostname,
+    existing.hostname
+  );
+
+  return getSiteCatalogSiteByHostname(existing.normalizedHostname);
+}
+
+export function deleteSiteCatalogSiteByHostname(siteKey: string) {
+  const existing = getSiteCatalogSiteByHostname(siteKey);
+  if (!existing) return false;
+  const result = db
+    .prepare(`DELETE FROM site_catalog_sites WHERE normalizedHostname = ? OR hostname = ?`)
+    .run(existing.normalizedHostname, existing.hostname);
+  return result.changes > 0;
+}

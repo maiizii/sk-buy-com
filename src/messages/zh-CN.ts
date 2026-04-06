@@ -21,7 +21,7 @@ export const zhCN = {
     cancel: "取消",
     search: "搜索",
     discover: "综合筛选",
-    sks: "SKS 状态",
+    sks: "SKS申请",
     navigation: "导航",
     closeSidebar: "关闭侧边栏",
     closeMenu: "关闭菜单",

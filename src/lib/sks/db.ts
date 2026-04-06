@@ -14,6 +14,8 @@ import type {
   SksSiteModelRecord,
   SksSiteRecord,
   SksSourceType,
+  SksSubmissionStatus,
+  SksUserSubmissionRecord,
 } from "@/lib/sks/types";
 import {
   SKS_RETENTION_DAYS,
@@ -111,13 +113,44 @@ db.exec(`
     FOREIGN KEY (siteId) REFERENCES sks_sites(id) ON DELETE CASCADE,
     FOREIGN KEY (credentialId) REFERENCES sks_credentials(id) ON DELETE SET NULL
   );
+
+  CREATE TABLE IF NOT EXISTS sks_user_submissions (
+    id TEXT PRIMARY KEY,
+    userId INTEGER NOT NULL,
+    hostname TEXT NOT NULL,
+    normalizedHostname TEXT NOT NULL,
+    apiBaseUrl TEXT NOT NULL,
+    homepageUrl TEXT,
+    displayName TEXT,
+    apiKeyPreview TEXT NOT NULL,
+    apiKeyEncrypted TEXT,
+    siteId TEXT,
+    credentialId TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    lastMessage TEXT,
+    sourceType TEXT NOT NULL DEFAULT 'owner',
+    createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+    updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+    validatedAt TEXT,
+    UNIQUE(userId, normalizedHostname),
+    FOREIGN KEY (siteId) REFERENCES sks_sites(id) ON DELETE SET NULL,
+    FOREIGN KEY (credentialId) REFERENCES sks_credentials(id) ON DELETE SET NULL
+  );
 `);
+
+const sksUserSubmissionColumns = db
+  .prepare(`PRAGMA table_info(sks_user_submissions)`)
+  .all() as Array<{ name: string }>;
+if (!sksUserSubmissionColumns.some((column) => column.name === "apiKeyEncrypted")) {
+  db.exec(`ALTER TABLE sks_user_submissions ADD COLUMN apiKeyEncrypted TEXT`);
+}
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sks_sites_visibility ON sks_sites(statusVisibility, normalizedHostname)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sks_credentials_site ON sks_credentials(siteId, isEnabled, priorityScore DESC, stabilityScore DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sks_site_models_site ON sks_site_models(siteId, isCurrentlyListed, isHot, modelName)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sks_probe_results_site ON sks_probe_results(siteId, probeType, checkedAt DESC)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sks_probe_results_model ON sks_probe_results(siteId, modelName, checkedAt DESC)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_sks_user_submissions_user ON sks_user_submissions(userId, status, datetime(createdAt) DESC)`);
 
 interface SksSiteRow {
   id: string;
@@ -190,6 +223,26 @@ interface SksProbeResultRow {
   createdAt: string;
 }
 
+interface SksUserSubmissionRow {
+  id: string;
+  userId: number;
+  hostname: string;
+  normalizedHostname: string;
+  apiBaseUrl: string;
+  homepageUrl: string | null;
+  displayName: string | null;
+  apiKeyPreview: string;
+  apiKeyEncrypted: string | null;
+  siteId: string | null;
+  credentialId: string | null;
+  status: SksSubmissionStatus;
+  lastMessage: string | null;
+  sourceType: SksSourceType;
+  createdAt: string;
+  updatedAt: string;
+  validatedAt: string | null;
+}
+
 function rowToSite(row: SksSiteRow): SksSiteRecord {
   return { ...row };
 }
@@ -211,6 +264,10 @@ function rowToSiteModel(row: SksSiteModelRow): SksSiteModelRecord {
 }
 
 function rowToProbeResult(row: SksProbeResultRow): SksProbeResultRecord {
+  return { ...row };
+}
+
+function rowToUserSubmission(row: SksUserSubmissionRow): SksUserSubmissionRecord {
   return { ...row };
 }
 
@@ -436,6 +493,79 @@ export function upsertSksSite(input: SksSiteImportInput) {
   );
 
   return getSksSiteRecordById(siteId)!;
+}
+
+export function updateSksSite(
+  siteKey: string,
+  input: {
+    displayName?: string;
+    homepageUrl?: string | null;
+    apiBaseUrl?: string;
+    statusVisibility?: SksSiteRecord["statusVisibility"];
+    ownershipStatus?: SksSiteRecord["ownershipStatus"];
+  }
+) {
+  const existing = getSksSiteRecordByKey(siteKey);
+  if (!existing) return null;
+
+  const now = toDbTimestamp();
+  const nextDisplayName =
+    input.displayName !== undefined ? String(input.displayName || "").trim() || existing.displayName : existing.displayName;
+  const nextHomepageUrl =
+    input.homepageUrl !== undefined
+      ? input.homepageUrl
+        ? normalizeApiBaseUrl(String(input.homepageUrl).trim())
+        : null
+      : existing.homepageUrl;
+  const nextApiBaseUrl =
+    input.apiBaseUrl !== undefined ? normalizeApiBaseUrl(String(input.apiBaseUrl || "").trim()) : existing.apiBaseUrl;
+  const nextStatusVisibility =
+    input.statusVisibility === "public" || input.statusVisibility === "unlisted" || input.statusVisibility === "private"
+      ? input.statusVisibility
+      : existing.statusVisibility;
+  const nextOwnershipStatus =
+    input.ownershipStatus === "unclaimed" ||
+    input.ownershipStatus === "observed" ||
+    input.ownershipStatus === "probable_owner" ||
+    input.ownershipStatus === "claimed"
+      ? input.ownershipStatus
+      : existing.ownershipStatus;
+
+  if (!nextApiBaseUrl) {
+    throw new Error("API Base URL 无效");
+  }
+
+  db.prepare(
+    `UPDATE sks_sites SET
+      displayName = ?,
+      homepageUrl = ?,
+      apiBaseUrl = ?,
+      statusVisibility = ?,
+      ownershipStatus = ?,
+      updatedAt = ?
+    WHERE id = ?`
+  ).run(
+    nextDisplayName,
+    nextHomepageUrl,
+    nextApiBaseUrl,
+    nextStatusVisibility,
+    nextOwnershipStatus,
+    now,
+    existing.id
+  );
+
+  db.prepare(
+    `UPDATE sks_credentials SET apiBaseUrl = ?, updatedAt = ? WHERE siteId = ?`
+  ).run(nextApiBaseUrl, now, existing.id);
+
+  return getSksSiteRecordById(existing.id)!;
+}
+
+export function deleteSksSite(siteKey: string) {
+  const existing = getSksSiteRecordByKey(siteKey);
+  if (!existing) return false;
+  const result = db.prepare(`DELETE FROM sks_sites WHERE id = ?`).run(existing.id);
+  return result.changes > 0;
 }
 
 export function getSksCredentialById(credentialId: string) {
@@ -764,11 +894,17 @@ export function getSksAdminSiteBase(siteKey: string) {
   const site = getSksSiteRecordByKey(siteKey);
   if (!site) return null;
 
+  const models = listSksSiteModels(site.id, { currentlyListedOnly: true });
+  const currentModelSet = new Set(models.map((item) => item.modelName));
+  const recentProbes = listSksProbeResults(site.id, { limit: 200 })
+    .filter((probe) => !probe.modelName || currentModelSet.has(probe.modelName))
+    .slice(0, 50);
+
   return {
     site,
     credentials: listSksCredentialsBySite(site.id).map(sanitizeCredential),
-    models: listSksSiteModels(site.id),
-    recentProbes: listSksProbeResults(site.id, { limit: 50 }),
+    models,
+    recentProbes,
   };
 }
 
@@ -780,6 +916,125 @@ export function cleanOldSksProbeResults(retentionDays: number = SKS_RETENTION_DA
   return result.changes;
 }
 
+export function getSksUserSubmissionById(submissionId: string) {
+  const row = db
+    .prepare(`SELECT * FROM sks_user_submissions WHERE id = ?`)
+    .get(submissionId) as SksUserSubmissionRow | undefined;
+  return row ? rowToUserSubmission(row) : null;
+}
+
+export function listSksUserSubmissionsByUser(userId: number) {
+  const rows = db
+    .prepare(
+      `SELECT *
+       FROM sks_user_submissions
+       WHERE userId = ?
+       ORDER BY datetime(createdAt) DESC, id DESC`
+    )
+    .all(userId) as SksUserSubmissionRow[];
+  return rows.map(rowToUserSubmission);
+}
+
+export function createSksUserSubmission(input: {
+  userId: number;
+  hostname: string;
+  normalizedHostname: string;
+  apiBaseUrl: string;
+  homepageUrl?: string | null;
+  displayName?: string | null;
+  apiKeyPreview: string;
+  apiKey?: string | null;
+  sourceType?: SksSourceType;
+}) {
+  const submissionId = crypto.randomUUID();
+  const now = toDbTimestamp();
+
+  try {
+    db.prepare(
+      `INSERT INTO sks_user_submissions (
+        id, userId, hostname, normalizedHostname, apiBaseUrl, homepageUrl, displayName,
+        apiKeyPreview, apiKeyEncrypted, status, lastMessage, sourceType, createdAt, updatedAt, validatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, NULL)`
+    ).run(
+      submissionId,
+      input.userId,
+      input.hostname,
+      input.normalizedHostname,
+      input.apiBaseUrl,
+      input.homepageUrl ?? null,
+      input.displayName ?? null,
+      input.apiKeyPreview,
+      input.apiKey ? encryptApiKey(input.apiKey) : null,
+      input.sourceType || "owner",
+      now,
+      now
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/unique/i.test(message)) {
+      throw new Error("你已经提交过这个网站，请不要重复提交");
+    }
+    throw error;
+  }
+
+  return getSksUserSubmissionById(submissionId)!;
+}
+
+export function setSksUserSubmissionResult(
+  submissionId: string,
+  input: {
+    status: SksSubmissionStatus;
+    lastMessage?: string | null;
+    siteId?: string | null;
+    credentialId?: string | null;
+    displayName?: string | null;
+    homepageUrl?: string | null;
+    apiBaseUrl?: string;
+    apiKeyPreview?: string;
+    apiKey?: string | null;
+    validatedAt?: string | null;
+  }
+) {
+  const existing = getSksUserSubmissionById(submissionId);
+  if (!existing) return null;
+
+  const now = toDbTimestamp();
+  db.prepare(
+    `UPDATE sks_user_submissions SET
+      status = ?,
+      lastMessage = ?,
+      siteId = ?,
+      credentialId = ?,
+      displayName = ?,
+      homepageUrl = ?,
+      apiBaseUrl = ?,
+      apiKeyPreview = ?,
+      apiKeyEncrypted = ?,
+      updatedAt = ?,
+      validatedAt = ?
+    WHERE id = ?`
+  ).run(
+    input.status,
+    input.lastMessage ?? existing.lastMessage,
+    input.siteId ?? existing.siteId,
+    input.credentialId ?? existing.credentialId,
+    input.displayName ?? existing.displayName,
+    input.homepageUrl ?? existing.homepageUrl,
+    input.apiBaseUrl ?? existing.apiBaseUrl,
+    input.apiKeyPreview ?? existing.apiKeyPreview,
+    input.apiKey !== undefined
+      ? input.apiKey
+        ? encryptApiKey(input.apiKey)
+        : null
+      : existing.apiKeyEncrypted,
+    now,
+    input.validatedAt ?? existing.validatedAt,
+    submissionId
+  );
+
+  return getSksUserSubmissionById(submissionId);
+}
+
 export function getSafeSksCredentialView(credentialId: string) {
   const credential = getSksCredentialById(credentialId);
   return credential ? sanitizeCredential(credential) : null;
@@ -787,4 +1042,21 @@ export function getSafeSksCredentialView(credentialId: string) {
 
 export function getSafeSksCredentialViews(siteId: string) {
   return listSksCredentialsBySite(siteId).map(sanitizeCredential);
+}
+
+export function getResolvedSksUserSubmissionById(submissionId: string) {
+  const record = getSksUserSubmissionById(submissionId);
+  if (!record) return null;
+
+  return {
+    record,
+    apiKey: record.apiKeyEncrypted ? decryptApiKey(record.apiKeyEncrypted) : "",
+  };
+}
+
+export function deleteSksUserSubmission(submissionId: string, userId: number) {
+  const existing = getSksUserSubmissionById(submissionId);
+  if (!existing || existing.userId !== userId) return false;
+  const result = db.prepare(`DELETE FROM sks_user_submissions WHERE id = ? AND userId = ?`).run(submissionId, userId);
+  return result.changes > 0;
 }

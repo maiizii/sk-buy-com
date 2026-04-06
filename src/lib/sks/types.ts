@@ -16,6 +16,10 @@ export type SksSourceType = "owner" | "community" | "system";
 
 export type SksOwnershipStatus = "unclaimed" | "observed" | "probable_owner" | "claimed";
 
+export type SksSubmissionStatus = "pending" | "approved" | "failed";
+
+export type SksCallTemplateKey = "badge" | "mini-grid" | "full-card" | "json-feed";
+
 export interface SksSiteRecord {
   id: string;
   hostname: string;
@@ -216,4 +220,45 @@ export interface SksFullProbeResult {
   modelListProbe: SksProbeResultRecord | null;
   syncedModels: string[];
   testedModels: SksProbeResultRecord[];
+}
+
+export interface SksUserSubmissionRecord {
+  id: string;
+  userId: number;
+  hostname: string;
+  normalizedHostname: string;
+  apiBaseUrl: string;
+  homepageUrl: string | null;
+  displayName: string | null;
+  apiKeyPreview: string;
+  apiKeyEncrypted: string | null;
+  siteId: string | null;
+  credentialId: string | null;
+  status: SksSubmissionStatus;
+  lastMessage: string | null;
+  sourceType: SksSourceType;
+  createdAt: string;
+  updatedAt: string;
+  validatedAt: string | null;
+}
+
+export interface SksCallOptionView {
+  template: SksCallTemplateKey;
+  label: string;
+  description: string;
+  statusPageUrl: string;
+  previewUrl: string;
+  jsonUrl: string;
+  iframeUrl: string | null;
+  scriptUrl: string | null;
+  iframeSnippet: string | null;
+  scriptSnippet: string | null;
+  jsonSnippet: string;
+}
+
+export interface SksUserSubmissionView {
+  submission: SksUserSubmissionRecord;
+  site: SksSiteRecord | null;
+  publicView: SksSiteDetailView | null;
+  callOptions: SksCallOptionView[];
 }

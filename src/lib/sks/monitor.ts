@@ -3,7 +3,6 @@ import { runSksFullProbe } from "@/lib/sks/probe";
 
 const SKS_MONITOR_INTERVAL_MS = 60 * 60 * 1000;
 const SKS_MONITOR_START_DELAY_MS = 3_000;
-const SKS_MONITOR_MODEL_LIMIT = 3;
 
 type SksMonitorGlobal = typeof globalThis & {
   __sksMonitorInterval?: ReturnType<typeof setInterval>;
@@ -23,6 +22,7 @@ export async function runSksMonitorCycle(): Promise<void> {
 
   try {
     const candidates = getAllSksSites()
+      .filter((site) => site.statusVisibility !== "private")
       .map((site) => ({
         site,
         credential: getPreferredResolvedSksCredential(site.id),
@@ -45,11 +45,11 @@ export async function runSksMonitorCycle(): Promise<void> {
       try {
         const result = await runSksFullProbe(site.id, {
           credentialId: credential.record.id,
-          modelLimit: SKS_MONITOR_MODEL_LIMIT,
+          fallbackToCurrentModels: false,
         });
 
         console.log(
-          `[SKS Monitor] ${site.displayName}: model-list=${result.modelListProbe?.status || "unknown"}, model-tests=${result.testedModels.length}`
+          `[SKS Monitor] ${site.displayName}: model-list=${result.modelListProbe?.status || "unknown"}, synced-models=${result.syncedModels.length}, model-tests=${result.testedModels.length}`
         );
       } catch (error) {
         console.error(`[SKS Monitor] ${site.displayName} probe failed:`, error);

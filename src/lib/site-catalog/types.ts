@@ -80,6 +80,7 @@ export interface SiteCatalogImportInput {
   runInitialProbe?: boolean;
   initialProbeModelLimit?: number;
   forceModels?: string[];
+  allowPrivateProbe?: boolean;
 }
 
 export interface SiteCatalogImportResult {

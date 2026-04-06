@@ -10,7 +10,10 @@
     "sks:import": "node scripts/sks-import-sites-from-file.cjs",
     "sks:report": "node scripts/sks-report.cjs",
     "sks:sync-models": "node scripts/sks-site-action.cjs sync-models",
-    "sks:test-model": "node scripts/sks-site-action.cjs test-model"
+    "sks:test-model": "node scripts/sks-site-action.cjs test-model",
+    "sks:validate-phase1": "node scripts/validate-phase1-admin-sks.mjs",
+    "sks:validate-phase1:admin": "node scripts/validate-phase1-admin-sks.mjs --only=admin",
+    "sks:validate-phase1:live": "node scripts/validate-phase1-admin-sks.mjs --only=live"
   },
   "dependencies": {
     "@radix-ui/react-hover-card": "^1.1.15",

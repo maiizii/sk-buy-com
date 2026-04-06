@@ -21,7 +21,7 @@ export const enUS = {
     cancel: "Cancel",
     search: "Search",
     discover: "Discover",
-    sks: "SKS Status",
+    sks: "SKS Apply",
     navigation: "Navigation",
     closeSidebar: "Close sidebar",
     closeMenu: "Close menu",

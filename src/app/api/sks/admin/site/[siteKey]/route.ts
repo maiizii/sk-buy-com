@@ -1,4 +1,6 @@
 import { requireAdmin } from "@/lib/auth";
+import { updateSiteCatalogSiteByHostname, deleteSiteCatalogSiteByHostname } from "@/lib/site-catalog/db";
+import { deleteSksSite, updateSksSite } from "@/lib/sks/db";
 import { runSksFullProbe, syncSksSiteModels, testSksModel } from "@/lib/sks/probe";
 import { getSksAdminSiteView } from "@/lib/sks/service";
 
@@ -76,7 +78,7 @@ export async function POST(
         modelLimit:
           typeof body.modelLimit === "number" && Number.isFinite(body.modelLimit)
             ? body.modelLimit
-            : 3,
+            : undefined,
         forceModels: Array.isArray(body.forceModels)
           ? body.forceModels.map((item: unknown) => String(item).trim()).filter(Boolean)
           : undefined,
@@ -90,6 +92,86 @@ export async function POST(
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "执行 SKS 管理动作失败";
+    const status = message === "Unauthorized" || message === "Forbidden"
+      ? 403
+      : message.includes("已暂停")
+        ? 409
+        : message.includes("不存在")
+          ? 404
+          : 500;
+    return createJsonResponse({ success: false, error: message }, { status });
+  }
+}
+
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ siteKey: string }> }
+) {
+  try {
+    await requireAdmin();
+    const { siteKey } = await params;
+    const body = await request.json();
+    const mode = String(body.mode || "edit").trim();
+
+    const nextSite = updateSksSite(siteKey, {
+      displayName: body.displayName,
+      homepageUrl: body.homepageUrl,
+      apiBaseUrl: body.apiBaseUrl,
+      statusVisibility:
+        mode === "pause"
+          ? "private"
+          : mode === "resume"
+            ? "public"
+            : body.statusVisibility,
+      ownershipStatus: body.ownershipStatus,
+    });
+
+    if (!nextSite) {
+      return createJsonResponse({ success: false, error: "SKS 站点不存在" }, { status: 404 });
+    }
+
+    updateSiteCatalogSiteByHostname(siteKey, {
+      displayName: nextSite.displayName,
+      homepageUrl: nextSite.homepageUrl,
+      apiBaseUrl: nextSite.apiBaseUrl,
+      visibility:
+        nextSite.statusVisibility === "private"
+          ? "private"
+          : nextSite.statusVisibility === "unlisted"
+            ? "unlisted"
+            : "public",
+      catalogStatus: mode === "pause" ? "hidden" : mode === "resume" ? "active" : undefined,
+    });
+
+    const detail = getSksAdminSiteView(nextSite.normalizedHostname || nextSite.id);
+    return createJsonResponse({ success: true, data: detail });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "更新 SKS 站点失败";
+    const status = message === "Unauthorized" || message === "Forbidden"
+      ? 403
+      : message.includes("不存在")
+        ? 404
+        : 500;
+    return createJsonResponse({ success: false, error: message }, { status });
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ siteKey: string }> }
+) {
+  try {
+    await requireAdmin();
+    const { siteKey } = await params;
+    const deleted = deleteSksSite(siteKey);
+    if (!deleted) {
+      return createJsonResponse({ success: false, error: "SKS 站点不存在" }, { status: 404 });
+    }
+
+    deleteSiteCatalogSiteByHostname(siteKey);
+    return createJsonResponse({ success: true, data: { siteKey } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "删除 SKS 站点失败";
     const status = message === "Unauthorized" || message === "Forbidden"
       ? 403
       : message.includes("不存在")

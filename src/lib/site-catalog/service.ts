@@ -229,10 +229,11 @@ export async function importSiteCatalogEntry(input: SiteCatalogImportInput): Pro
             typeof resolvedInput.initialProbeModelLimit === "number" &&
             Number.isFinite(resolvedInput.initialProbeModelLimit)
               ? resolvedInput.initialProbeModelLimit
-              : 3,
+              : undefined,
           forceModels: Array.isArray(resolvedInput.forceModels)
             ? resolvedInput.forceModels.map((item) => String(item || "").trim()).filter(Boolean)
             : undefined,
+          allowPrivateProbe: resolvedInput.allowPrivateProbe,
         });
       } catch (error) {
         probeError = error instanceof Error ? error.message : "首次探测失败";

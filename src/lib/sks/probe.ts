@@ -184,11 +184,25 @@ function extractModelNames(payload: unknown) {
   return [];
 }
 
-function resolveSiteAndCredential(siteKey: string, credentialId?: string | null) {
+function assertSksSiteProbeAllowed(siteKey: string, allowPrivateProbe: boolean = false) {
   const site = getSksSiteRecordByKey(siteKey);
   if (!site) {
     throw new Error("站点不存在");
   }
+
+  if (!allowPrivateProbe && site.statusVisibility === "private") {
+    throw new Error("该 SKS 站点已暂停，已禁止所有网站与模型检测");
+  }
+
+  return site;
+}
+
+function resolveSiteAndCredential(
+  siteKey: string,
+  credentialId?: string | null,
+  options: { allowPrivateProbe?: boolean } = {}
+) {
+  const site = assertSksSiteProbeAllowed(siteKey, options.allowPrivateProbe === true);
 
   const resolvedCredential = credentialId
     ? getResolvedSksCredentialById(credentialId)
@@ -250,9 +264,11 @@ function saveProbeAndCredentialOutcome(input: {
 
 export async function syncSksSiteModels(
   siteKey: string,
-  options: { credentialId?: string | null } = {}
+  options: { credentialId?: string | null; allowPrivateProbe?: boolean } = {}
 ): Promise<SksSyncModelsResult> {
-  const { site, resolvedCredential } = resolveSiteAndCredential(siteKey, options.credentialId);
+  const { site, resolvedCredential } = resolveSiteAndCredential(siteKey, options.credentialId, {
+    allowPrivateProbe: options.allowPrivateProbe,
+  });
   const modelsUrl = buildOpenAiUrl(resolvedCredential.record.apiBaseUrl, "models");
 
   const fetchResult = await timedFetch(modelsUrl, {
@@ -312,14 +328,16 @@ export async function syncSksSiteModels(
 export async function testSksModel(
   siteKey: string,
   modelName: string,
-  options: { credentialId?: string | null } = {}
+  options: { credentialId?: string | null; allowPrivateProbe?: boolean } = {}
 ): Promise<SksModelTestResult> {
   const normalizedModelName = modelName.trim();
   if (!normalizedModelName) {
     throw new Error("模型名称不能为空");
   }
 
-  const { site, resolvedCredential } = resolveSiteAndCredential(siteKey, options.credentialId);
+  const { site, resolvedCredential } = resolveSiteAndCredential(siteKey, options.credentialId, {
+    allowPrivateProbe: options.allowPrivateProbe,
+  });
   const existingModels = listSksSiteModels(site.id, { currentlyListedOnly: true }).map(
     (item) => item.modelName
   );
@@ -390,31 +408,39 @@ export async function runSksFullProbe(
     credentialId?: string | null;
     modelLimit?: number;
     forceModels?: string[];
+    fallbackToCurrentModels?: boolean;
+    allowPrivateProbe?: boolean;
   } = {}
 ): Promise<SksFullProbeResult> {
   const syncResult = await syncSksSiteModels(siteKey, {
     credentialId: options.credentialId,
+    allowPrivateProbe: options.allowPrivateProbe,
   });
 
   const fallbackModels = listSksSiteModels(syncResult.site.id, {
     currentlyListedOnly: true,
   }).map((item) => item.modelName);
 
-  const candidateModels = dedupeStrings(
-    options.forceModels?.length
-      ? options.forceModels
-      : syncResult.models.length > 0
-        ? syncResult.models
-        : fallbackModels
-  );
+  const forcedModels = dedupeStrings(options.forceModels || []);
+  const candidateModels = forcedModels.length > 0
+    ? forcedModels
+    : syncResult.models.length > 0
+      ? dedupeStrings(syncResult.models)
+      : options.fallbackToCurrentModels === false
+        ? []
+        : dedupeStrings(fallbackModels);
 
-  const modelLimit = Math.max(1, Math.floor(options.modelLimit ?? 3));
+  const modelLimit =
+    typeof options.modelLimit === "number" && Number.isFinite(options.modelLimit)
+      ? Math.max(1, Math.floor(options.modelLimit))
+      : candidateModels.length;
   const modelsToTest = chooseHotModels(candidateModels, modelLimit);
   const testedModels: SksProbeResultRecord[] = [];
 
   for (const modelName of modelsToTest) {
     const result = await testSksModel(siteKey, modelName, {
       credentialId: options.credentialId,
+      allowPrivateProbe: options.allowPrivateProbe,
     });
     testedModels.push(result.probe);
   }

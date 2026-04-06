@@ -87,6 +87,21 @@ interface ConfigSummary {
   values?: Array<{ id: number; platformId: number; groupKey: string; optionValue: string; valueText?: string }>;
 }
 
+interface SiteCatalogAdminRecord {
+  hostname: string;
+  normalizedHostname: string;
+  displayName: string;
+  homepageUrl: string | null;
+  apiBaseUrl: string;
+  siteSystem: string;
+  sourceStage: string;
+  sourceModule: string;
+  catalogStatus: string;
+  visibility: "public" | "unlisted" | "private";
+  hasCredential: boolean;
+  updatedAt: string;
+}
+
 interface SksSiteRecord {
   id: string;
   hostname: string;
@@ -166,11 +181,6 @@ interface SksSiteAdminView {
   } | null;
 }
 
-interface SksActionResult {
-  title: string;
-  payload: unknown;
-}
-
 const t = getMessages();
 
 const emptyGroupForm: {
@@ -236,24 +246,18 @@ const emptyPlatformForm = {
   status: "active",
 };
 
-const emptySksImportForm = {
+const emptySksEditForm: {
+  displayName: string;
+  homepageUrl: string;
+  apiBaseUrl: string;
+  statusVisibility: "public" | "unlisted" | "private";
+  ownershipStatus: string;
+} = {
   displayName: "",
   homepageUrl: "",
   apiBaseUrl: "",
-  apiKey: "",
-  label: "",
-  statusVisibility: "public" as const,
-  priorityScore: 100,
-  runInitialProbe: true,
-  modelLimit: 3,
-  forceModels: "",
-};
-
-const emptySksActionForm = {
-  credentialId: "",
-  modelLimit: 3,
-  forceModels: "",
-  manualModelName: "",
+  statusVisibility: "public",
+  ownershipStatus: "unclaimed",
 };
 
 function parseAdminTimestamp(value: string | null | undefined) {
@@ -309,21 +313,6 @@ function getSksStatusMeta(status: string) {
         className:
           "border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300",
       };
-  }
-}
-
-function parseModelsInput(value: string) {
-  return value
-    .split(/[\n,]/g)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function stringifyActionPayload(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
   }
 }
 
@@ -402,25 +391,27 @@ export default function AdminPage() {
   const [platformForm, setPlatformForm] = useState(emptyPlatformForm);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [siteCatalogSites, setSiteCatalogSites] = useState<SiteCatalogAdminRecord[]>([]);
   const [sksSites, setSksSites] = useState<SksSiteAdminListItem[]>([]);
   const [selectedSksSiteKey, setSelectedSksSiteKey] = useState("");
   const [sksDetail, setSksDetail] = useState<SksSiteAdminView | null>(null);
-  const [sksImportForm, setSksImportForm] = useState(emptySksImportForm);
-  const [sksActionForm, setSksActionForm] = useState(emptySksActionForm);
+  const [sksEditForm, setSksEditForm] = useState(emptySksEditForm);
   const [sksDetailLoading, setSksDetailLoading] = useState(false);
-  const [sksActionLoading, setSksActionLoading] = useState<"" | "import" | "sync_models" | "run_probe" | "test_model">("");
-  const [sksLastActionResult, setSksLastActionResult] = useState<SksActionResult | null>(null);
+  const [siteCatalogActionLoading, setSiteCatalogActionLoading] = useState<"" | "hide" | "restore" | "delete">("");
+  const [sksActionLoading, setSksActionLoading] = useState<"" | "edit" | "pause" | "resume" | "delete" | "probe">("");
 
   const loadDashboard = useCallback(async () => {
-    const [platformRes, configRes, sksRes] = await Promise.all([
+    const [platformRes, configRes, sksRes, siteCatalogRes] = await Promise.all([
       fetch("/api/platforms", { cache: "no-store" }),
       fetch("/api/platforms/config", { cache: "no-store" }),
       fetch("/api/sks/admin/sites", { cache: "no-store" }),
+      fetch("/api/site-catalog/admin/sites", { cache: "no-store" }),
     ]);
-    const [platformData, configData, sksData] = await Promise.all([
+    const [platformData, configData, sksData, siteCatalogData] = await Promise.all([
       platformRes.json(),
       configRes.json(),
       sksRes.json(),
+      siteCatalogRes.json(),
     ]);
     if (platformData.success) setPlatforms(platformData.data);
     if (configData.success) setConfigSummary(configData.data);
@@ -428,6 +419,11 @@ export default function AdminPage() {
       setSksSites(sksData.data);
     } else {
       setSksSites([]);
+    }
+    if (siteCatalogData.success) {
+      setSiteCatalogSites(siteCatalogData.data);
+    } else {
+      setSiteCatalogSites([]);
     }
   }, []);
 
@@ -451,18 +447,13 @@ export default function AdminPage() {
 
       const detail = data.data as SksSiteAdminView;
       setSksDetail(detail);
-      setSksActionForm((prev) => ({
-        credentialId:
-          prev.credentialId && detail.credentials.some((item) => item.id === prev.credentialId)
-            ? prev.credentialId
-            : detail.credentials.find((item) => item.isEnabled)?.id || detail.credentials[0]?.id || "",
-        modelLimit: prev.modelLimit > 0 ? prev.modelLimit : 3,
-        forceModels: prev.forceModels,
-        manualModelName:
-          prev.manualModelName && detail.models.some((item) => item.modelName === prev.manualModelName)
-            ? prev.manualModelName
-            : detail.models.find((item) => item.isHot)?.modelName || detail.models[0]?.modelName || "",
-      }));
+      setSksEditForm({
+        displayName: detail.site.displayName || "",
+        homepageUrl: detail.site.homepageUrl || "",
+        apiBaseUrl: detail.site.apiBaseUrl || "",
+        statusVisibility: detail.site.statusVisibility,
+        ownershipStatus: detail.site.ownershipStatus || "unclaimed",
+      });
     } catch (error) {
       setSksDetail(null);
       setMessage(error instanceof Error ? error.message : "获取 SKS 站点详情失败");
@@ -757,120 +748,163 @@ export default function AdminPage() {
     }
   };
 
-  const submitSksImport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSksActionLoading("import");
+  const updateSiteCatalogVisibility = async (siteKey: string, mode: "hide" | "restore") => {
+    setSiteCatalogActionLoading(mode);
     setMessage("");
-
     try {
-      const forceModels = parseModelsInput(sksImportForm.forceModels);
-      const res = await fetch("/api/sks/admin/sites", {
-        method: "POST",
+      const res = await fetch("/api/site-catalog/admin/sites", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          displayName: sksImportForm.displayName || undefined,
-          homepageUrl: sksImportForm.homepageUrl || undefined,
-          apiBaseUrl: sksImportForm.apiBaseUrl,
-          apiKey: sksImportForm.apiKey,
-          label: sksImportForm.label || undefined,
-          statusVisibility: sksImportForm.statusVisibility,
-          priorityScore: Number(sksImportForm.priorityScore || 0),
-          runInitialProbe: sksImportForm.runInitialProbe,
-          modelLimit: Math.max(1, Number(sksImportForm.modelLimit || 3)),
-          forceModels,
-        }),
+        body: JSON.stringify({ siteKey, mode }),
       });
       const data = await res.json();
-
       if (!data.success) {
-        throw new Error(data.error || "导入 SKS 站点失败");
+        throw new Error(data.error || "更新首页目录站点失败");
       }
-
-      const siteKey = data.data.site.normalizedHostname || data.data.site.id;
-      setActiveWorkspace("sks");
-      setSelectedSksSiteKey(siteKey);
-      setSksLastActionResult({
-        title: `站点 ${data.data.site.displayName} 已导入`,
-        payload: data.data,
-      });
-      setSksImportForm((prev) => ({
-        ...emptySksImportForm,
-        statusVisibility: prev.statusVisibility,
-        priorityScore: prev.priorityScore,
-        modelLimit: prev.modelLimit,
-      }));
-      setMessage(
-        data.data.probeError
-          ? `站点已导入，但首次探测失败：${data.data.probeError}`
-          : `站点 ${data.data.site.displayName} 已导入并完成首次探测`
-      );
-      await refreshSksWorkspace(siteKey);
+      await loadDashboard();
+      setMessage(mode === "hide" ? "首页目录站点已隐藏" : "首页目录站点已恢复");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "导入 SKS 站点失败");
+      setMessage(error instanceof Error ? error.message : "更新首页目录站点失败");
     } finally {
-      setSksActionLoading("");
+      setSiteCatalogActionLoading("");
     }
   };
 
-  const runSksSiteAction = async (action: "sync_models" | "run_probe" | "test_model") => {
-    if (!selectedSksSiteKey) {
+  const removeSiteCatalogSite = async (siteKey: string) => {
+    if (!confirm(`确认删除首页目录站点 ${siteKey} 吗？删除后首页将不再显示该站点。`)) {
+      return;
+    }
+
+    setSiteCatalogActionLoading("delete");
+    setMessage("");
+    try {
+      const res = await fetch(`/api/site-catalog/admin/sites?siteKey=${encodeURIComponent(siteKey)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "删除首页目录站点失败");
+      }
+      await loadDashboard();
+      setMessage("首页目录站点已删除");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除首页目录站点失败");
+    } finally {
+      setSiteCatalogActionLoading("");
+    }
+  };
+
+  const updateSksSiteMeta = async (
+    mode: "edit" | "pause" | "resume",
+    siteKey: string = selectedSksSiteKey
+  ) => {
+    if (!siteKey) {
       setMessage("请先选择一个 SKS 站点");
       return;
     }
 
-    const targetModelName = sksActionForm.manualModelName.trim();
-    if (action === "test_model" && !targetModelName) {
-      setMessage("请先输入要测试的模型名称");
-      return;
-    }
-
-    setSksActionLoading(action);
+    setSksActionLoading(mode);
     setMessage("");
-
     try {
-      const payload: Record<string, unknown> = {
-        action,
-        credentialId: sksActionForm.credentialId || undefined,
-      };
-
-      if (action === "run_probe") {
-        const forceModels = parseModelsInput(sksActionForm.forceModels);
-        payload.modelLimit = Math.max(1, Number(sksActionForm.modelLimit || 3));
-        if (forceModels.length > 0) payload.forceModels = forceModels;
-      }
-
-      if (action === "test_model") {
-        payload.modelName = targetModelName;
-      }
-
-      const res = await fetch(`/api/sks/admin/site/${encodeURIComponent(selectedSksSiteKey)}`, {
-        method: "POST",
+      const res = await fetch(`/api/sks/admin/site/${encodeURIComponent(siteKey)}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          mode,
+          displayName: sksEditForm.displayName,
+          homepageUrl: sksEditForm.homepageUrl || null,
+          apiBaseUrl: sksEditForm.apiBaseUrl,
+          statusVisibility: sksEditForm.statusVisibility,
+          ownershipStatus: sksEditForm.ownershipStatus,
+        }),
       });
       const data = await res.json();
-
       if (!data.success) {
-        throw new Error(data.error || "执行 SKS 动作失败");
+        throw new Error(data.error || "更新 SKS 站点失败");
       }
 
-      const titleMap = {
-        sync_models: "模型列表已同步",
-        run_probe: "全量探测已完成",
-        test_model: `模型 ${targetModelName} 测试已完成`,
-      };
-      const title = titleMap[action];
-      setSksLastActionResult({ title, payload: data.data });
-      setMessage(title);
-      await refreshSksWorkspace(selectedSksSiteKey);
+      const detail = data.data as SksSiteAdminView;
+      setSelectedSksSiteKey(siteKey);
+      setSksDetail(detail);
+      setSksEditForm({
+        displayName: detail.site.displayName || "",
+        homepageUrl: detail.site.homepageUrl || "",
+        apiBaseUrl: detail.site.apiBaseUrl || "",
+        statusVisibility: detail.site.statusVisibility,
+        ownershipStatus: detail.site.ownershipStatus || "unclaimed",
+      });
+      await loadDashboard();
+      setMessage(mode === "edit" ? "SKS 站点已更新" : mode === "pause" ? "SKS 站点已暂停" : "SKS 站点已恢复");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "执行 SKS 动作失败");
+      setMessage(error instanceof Error ? error.message : "更新 SKS 站点失败");
     } finally {
       setSksActionLoading("");
     }
   };
+
+  const removeSksSite = async (siteKey: string = selectedSksSiteKey) => {
+    if (!siteKey) {
+      setMessage("请先选择一个 SKS 站点");
+      return;
+    }
+
+    if (!confirm(`确认删除 SKS 站点 ${siteKey} 吗？该操作会同时删除关联凭据、模型与探测记录。`)) {
+      return;
+    }
+
+    setSksActionLoading("delete");
+    setMessage("");
+    try {
+      const res = await fetch(`/api/sks/admin/site/${encodeURIComponent(siteKey)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "删除 SKS 站点失败");
+      }
+
+      if (siteKey === selectedSksSiteKey) {
+        setSksDetail(null);
+        setSelectedSksSiteKey("");
+      }
+      await loadDashboard();
+      setMessage("SKS 站点已删除");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除 SKS 站点失败");
+    } finally {
+      setSksActionLoading("");
+    }
+  };
+
+  const refreshSksSiteProbe = async (siteKey: string = selectedSksSiteKey) => {
+    if (!siteKey) {
+      setMessage("请先选择一个 SKS 站点");
+      return;
+    }
+
+    setSksActionLoading("probe");
+    setMessage("");
+    try {
+      const res = await fetch(`/api/sks/admin/site/${encodeURIComponent(siteKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_probe" }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "刷新检测失败");
+      }
+
+      await refreshSksWorkspace(siteKey);
+      setSelectedSksSiteKey(siteKey);
+      setMessage("SKS 站点已重新执行全量检测");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "刷新检测失败");
+    } finally {
+      setSksActionLoading("");
+    }
+  };
+
 
   if (!authChecked) {
     return (
@@ -895,7 +929,7 @@ export default function AdminPage() {
     { key: "attributes", title: t.admin.attributeManagement, desc: "当前已可配置分组与标签，作为筛选/对比的基础设施。", icon: Shapes },
     { key: "models", title: t.admin.modelRegistry, desc: "模型数量巨大，建议走独立模型库与平台绑定体系。", icon: Boxes },
     { key: "monitoring", title: t.admin.monitoringCenter, desc: "连通率、延迟将逐步由实测聚合数据自动计算。", icon: Radar },
-    { key: "sks", title: "SKS 工作台", desc: "导入真实站点与密钥，抓取模型列表并执行单模型测试。", icon: Activity },
+    { key: "sks", title: "SKS 工作台", desc: "管理用户提交后已收录的 SKS 站点，并在后台做编辑、暂停、恢复与删除。", icon: Activity },
     { key: "search", title: t.admin.searchWorkbench, desc: "前台搜索工作台将由这些配置动态生成。", icon: Settings },
   ];
 
@@ -914,8 +948,9 @@ export default function AdminPage() {
 
       {!!message && <section className="admin-card px-4 py-3 text-sm text-[var(--accent-strong)]">{message}</section>}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <div className="admin-stat-card"><span className="text-xs text-muted">平台总数</span><span className="text-2xl font-bold font-mono">{platforms.length}</span></div>
+        <div className="admin-stat-card"><span className="text-xs text-muted">首页目录站点</span><span className="text-2xl font-bold font-mono text-cyan-400">{siteCatalogSites.length}</span></div>
         <div className="admin-stat-card"><span className="text-xs text-muted">已启用监控</span><span className="text-2xl font-bold font-mono text-emerald-400">{platforms.filter((p) => p.monitorEnabled).length}</span></div>
         <div className="admin-stat-card"><span className="text-xs text-muted">属性分组</span><span className="text-2xl font-bold font-mono text-blue-400">{configSummary.groups.length}</span></div>
         <div className="admin-stat-card"><span className="text-xs text-muted">标签选项</span><span className="text-2xl font-bold font-mono text-violet-400">{configSummary.options.length}</span></div>
@@ -1087,6 +1122,58 @@ export default function AdminPage() {
           </div>
         </div>
       </section>
+      )}
+
+      {(activeWorkspace === "overview" || activeWorkspace === "platforms") && (
+        <section className="admin-card p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold">首页目录站点管理</h3>
+              <p className="mt-1 text-sm text-[var(--muted)]">这里才是首页展示网站的数据源。删除或隐藏这里的测试站点后，首页就不会再显示。</p>
+            </div>
+            <button type="button" className="btn-glass" onClick={() => loadDashboard().catch(console.error)}>
+              <RefreshCw className="h-4 w-4" />刷新
+            </button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {siteCatalogSites.map((site) => (
+              <div key={site.normalizedHostname} className="rounded-2xl border border-[var(--border-color)] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{site.displayName}</p>
+                    <p className="mt-1 text-xs text-[var(--muted)]">{site.normalizedHostname}</p>
+                  </div>
+                  <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[10px] text-[var(--muted)]">{site.catalogStatus}</span>
+                </div>
+                <div className="mt-3 space-y-1 text-xs text-[var(--muted)]">
+                  <p>可见性：<span className="text-[var(--foreground)]">{site.visibility}</span></p>
+                  <p>来源：<span className="text-[var(--foreground)]">{site.sourceStage}/{site.sourceModule}</span></p>
+                  <p className="break-all">API Base：<span className="text-[var(--foreground)]">{site.apiBaseUrl}</span></p>
+                  <p>更新时间：<span className="text-[var(--foreground)]">{formatAdminDateTime(site.updatedAt)}</span></p>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn-glass"
+                    disabled={siteCatalogActionLoading !== ""}
+                    onClick={() => updateSiteCatalogVisibility(site.normalizedHostname, site.catalogStatus === "hidden" || site.visibility === "private" ? "restore" : "hide")}
+                  >
+                    {site.catalogStatus === "hidden" || site.visibility === "private" ? "恢复首页显示" : "从首页隐藏"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-glass"
+                    disabled={siteCatalogActionLoading !== ""}
+                    onClick={() => removeSiteCatalogSite(site.normalizedHostname)}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))}
+            {siteCatalogSites.length === 0 ? <p className="text-sm text-[var(--muted)]">当前没有首页目录站点数据。</p> : null}
+          </div>
+        </section>
       )}
 
       {activeWorkspace === "platforms" && (
@@ -1266,38 +1353,11 @@ export default function AdminPage() {
             <div className="admin-stat-card"><span className="text-xs text-muted">当前异常站点</span><span className="text-2xl font-bold font-mono text-rose-400">{sksOverview.failedCount + sksOverview.degradedCount}</span></div>
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[1.05fr_1.35fr]">
-            <div className="admin-card p-6 space-y-4">
-              <div className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-[var(--accent-strong)]" />
-                <h3 className="text-base font-semibold">导入 SKS 站点与凭据</h3>
-              </div>
-              <p className="text-sm leading-6 text-[var(--muted)]">
-                把真实 API Base 与测试 key 录入 SKS 后，即可立即执行模型列表抓取、热门模型探测与单模型联调。
-              </p>
-              <form onSubmit={submitSksImport} className="grid gap-4 md:grid-cols-2">
-                <label className="space-y-2"><span className="admin-label">站点名称（可选）</span><input className="admin-input" value={sksImportForm.displayName} onChange={(e) => setSksImportForm((prev) => ({ ...prev, displayName: e.target.value }))} placeholder="newapi / sub2api" /></label>
-                <label className="space-y-2"><span className="admin-label">站点首页（可选）</span><input className="admin-input" value={sksImportForm.homepageUrl} onChange={(e) => setSksImportForm((prev) => ({ ...prev, homepageUrl: e.target.value }))} placeholder="https://example.com" /></label>
-                <label className="space-y-2 md:col-span-2"><span className="admin-label">API Base URL</span><input className="admin-input" value={sksImportForm.apiBaseUrl} onChange={(e) => setSksImportForm((prev) => ({ ...prev, apiBaseUrl: e.target.value }))} placeholder="https://example.com/v1" required /></label>
-                <label className="space-y-2 md:col-span-2"><span className="admin-label">API Key</span><textarea className="admin-input min-h-24 font-mono text-xs" value={sksImportForm.apiKey} onChange={(e) => setSksImportForm((prev) => ({ ...prev, apiKey: e.target.value }))} placeholder="sk-..." required /></label>
-                <label className="space-y-2"><span className="admin-label">凭据标签（可选）</span><input className="admin-input" value={sksImportForm.label} onChange={(e) => setSksImportForm((prev) => ({ ...prev, label: e.target.value }))} placeholder="owner / debug / seed" /></label>
-                <label className="space-y-2"><span className="admin-label">公开性</span><select className="admin-input" value={sksImportForm.statusVisibility} onChange={(e) => setSksImportForm((prev) => ({ ...prev, statusVisibility: e.target.value as typeof prev.statusVisibility }))}><option value="public">public</option><option value="unlisted">unlisted</option><option value="private">private</option></select></label>
-                <label className="space-y-2"><span className="admin-label">凭据优先级</span><input type="number" className="admin-input" value={sksImportForm.priorityScore} onChange={(e) => setSksImportForm((prev) => ({ ...prev, priorityScore: Number(e.target.value) }))} /></label>
-                <label className="space-y-2"><span className="admin-label">首次探测模型数</span><input type="number" min={1} className="admin-input" value={sksImportForm.modelLimit} onChange={(e) => setSksImportForm((prev) => ({ ...prev, modelLimit: Number(e.target.value) }))} /></label>
-                <label className="space-y-2 md:col-span-2"><span className="admin-label">首次探测强制模型（逗号或换行分隔，可选）</span><textarea className="admin-input min-h-24" value={sksImportForm.forceModels} onChange={(e) => setSksImportForm((prev) => ({ ...prev, forceModels: e.target.value }))} placeholder="gpt-4o-mini&#10;deepseek-chat" /></label>
-                <label className="md:col-span-2 flex items-center gap-2 rounded-xl border border-[var(--border-color)] px-3 py-2"><input type="checkbox" checked={sksImportForm.runInitialProbe} onChange={(e) => setSksImportForm((prev) => ({ ...prev, runInitialProbe: e.target.checked }))} /><span>导入后立即执行首次探测</span></label>
-                <div className="md:col-span-2 flex gap-2">
-                  <button type="submit" disabled={sksActionLoading !== ""} className="btn-glass btn-glass-primary">{sksActionLoading === "import" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}导入并探测</button>
-                  <button type="button" className="btn-glass" onClick={() => setSksImportForm((prev) => ({ ...emptySksImportForm, statusVisibility: prev.statusVisibility, priorityScore: prev.priorityScore, modelLimit: prev.modelLimit }))}>重置</button>
-                </div>
-              </form>
-            </div>
-
-            <div className="admin-card p-6 space-y-4">
+          <section className="admin-card p-6 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-base font-semibold">已登记 SKS 站点</h3>
-                  <p className="mt-1 text-sm text-[var(--muted)]">点击站点即可查看凭据、模型、近期探测结果与调试入口。</p>
+                  <p className="mt-1 text-sm text-[var(--muted)]">点击站点即可查看凭据、模型、近期探测结果，并在后台做维护。</p>
                 </div>
                 <button type="button" className="btn-glass" onClick={() => refreshSksWorkspace().catch(console.error)}>
                   <RefreshCw className="h-4 w-4" />刷新
@@ -1311,22 +1371,36 @@ export default function AdminPage() {
                     const isActive = selectedSksSiteKey === siteKey;
                     const statusMeta = getSksStatusMeta(item.currentStatus);
                     return (
-                      <button
+                      <div
                         key={item.site.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedSksSiteKey(siteKey);
-                          setSksActionForm(emptySksActionForm);
-                          setSksLastActionResult(null);
-                        }}
-                        className={`rounded-2xl border p-4 text-left transition ${isActive ? "border-[var(--accent)] bg-[var(--accent-soft)]/40 ring-2 ring-[var(--accent)]/15" : "border-[var(--border-color)] hover:border-[var(--accent)]/40 hover:bg-[var(--card-hover)]"}`}
+                        className={`rounded-2xl border p-4 transition ${isActive ? "border-[var(--accent)] bg-[var(--accent-soft)]/40 ring-2 ring-[var(--accent)]/15" : "border-[var(--border-color)] hover:border-[var(--accent)]/40 hover:bg-[var(--card-hover)]"}`}
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold text-[var(--foreground)]">{item.site.displayName}</p>
-                            <p className="mt-1 text-xs text-[var(--muted)]">{item.site.hostname}</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedSksSiteKey(siteKey);
+                            }}
+                            className="flex-1 text-left"
+                          >
+                            <div>
+                              <p className="font-semibold text-[var(--foreground)]">{item.site.displayName}</p>
+                              <p className="mt-1 text-xs text-[var(--muted)]">{item.site.hostname}</p>
+                            </div>
+                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${statusMeta.className}`}>{statusMeta.label}</span>
+                            <button type="button" className="btn-glass" onClick={() => refreshSksSiteProbe(siteKey)} disabled={sksActionLoading !== ""}>
+                              {sksActionLoading === "probe" && selectedSksSiteKey === siteKey ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                              刷新检测
+                            </button>
+                            <button type="button" className="btn-glass" onClick={() => updateSksSiteMeta(item.site.statusVisibility === "private" ? "resume" : "pause", siteKey)} disabled={sksActionLoading !== ""}>
+                              {item.site.statusVisibility === "private" ? "恢复" : "暂停"}
+                            </button>
+                            <button type="button" className="btn-glass" onClick={() => removeSksSite(siteKey)} disabled={sksActionLoading !== ""}>
+                              删除
+                            </button>
                           </div>
-                          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${statusMeta.className}`}>{statusMeta.label}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-[var(--muted)] sm:grid-cols-2">
                           <span>启用凭据：{item.enabledCredentialCount}/{item.credentialCount}</span>
@@ -1334,14 +1408,13 @@ export default function AdminPage() {
                           <span>可见性：{item.site.statusVisibility}</span>
                           <span>最近检查：{formatAdminDateTime(item.lastCheckedAt)}</span>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
               ) : (
-                <p className="text-sm text-[var(--muted)]">当前还没有 SKS 站点。导入真实 API 站点后，这里会出现可调试列表。</p>
+                <p className="text-sm text-[var(--muted)]">当前还没有 SKS 站点。后续用户提交并收录后，这里会显示可维护的站点列表。</p>
               )}
-            </div>
           </section>
 
           <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
@@ -1379,13 +1452,56 @@ export default function AdminPage() {
                           </div>
                           <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${getSksStatusMeta(sksDetail.publicView?.current.status || "unknown").className}`}>{getSksStatusMeta(sksDetail.publicView?.current.status || "unknown").label}</span>
                         </div>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <label className="space-y-2">
+                            <span className="admin-label">站点名称</span>
+                            <input className="admin-input" value={sksEditForm.displayName} onChange={(e) => setSksEditForm((prev) => ({ ...prev, displayName: e.target.value }))} />
+                          </label>
+                          <label className="space-y-2">
+                            <span className="admin-label">站点首页</span>
+                            <input className="admin-input" value={sksEditForm.homepageUrl} onChange={(e) => setSksEditForm((prev) => ({ ...prev, homepageUrl: e.target.value }))} placeholder="https://example.com" />
+                          </label>
+                          <label className="space-y-2 md:col-span-2">
+                            <span className="admin-label">API Base URL</span>
+                            <input className="admin-input" value={sksEditForm.apiBaseUrl} onChange={(e) => setSksEditForm((prev) => ({ ...prev, apiBaseUrl: e.target.value }))} />
+                          </label>
+                          <label className="space-y-2">
+                            <span className="admin-label">可见性</span>
+                            <select className="admin-input" value={sksEditForm.statusVisibility} onChange={(e) => setSksEditForm((prev) => ({ ...prev, statusVisibility: e.target.value as typeof prev.statusVisibility }))}>
+                              <option value="public">public</option>
+                              <option value="unlisted">unlisted</option>
+                              <option value="private">private</option>
+                            </select>
+                          </label>
+                          <label className="space-y-2">
+                            <span className="admin-label">归属状态</span>
+                            <select className="admin-input" value={sksEditForm.ownershipStatus} onChange={(e) => setSksEditForm((prev) => ({ ...prev, ownershipStatus: e.target.value }))}>
+                              <option value="unclaimed">unclaimed</option>
+                              <option value="observed">observed</option>
+                              <option value="probable_owner">probable_owner</option>
+                              <option value="claimed">claimed</option>
+                            </select>
+                          </label>
+                        </div>
                         <div className="mt-3 space-y-2 text-xs leading-6 text-[var(--muted)]">
-                          <p>API Base：<span className="break-all text-[var(--foreground)]">{sksDetail.site.apiBaseUrl}</span></p>
-                          <p>Homepage：<span className="break-all text-[var(--foreground)]">{sksDetail.site.homepageUrl || "—"}</span></p>
+                          <p>当前记录 API Base：<span className="break-all text-[var(--foreground)]">{sksDetail.site.apiBaseUrl}</span></p>
+                          <p>当前记录 Homepage：<span className="break-all text-[var(--foreground)]">{sksDetail.site.homepageUrl || "—"}</span></p>
                           <p>可见性：<span className="text-[var(--foreground)]">{sksDetail.site.statusVisibility}</span> · 归属状态：<span className="text-[var(--foreground)]">{sksDetail.site.ownershipStatus}</span></p>
                           <p>最近检查：<span className="text-[var(--foreground)]">{formatAdminDateTime(sksDetail.publicView?.current.checkedAt)}</span></p>
                           <p>当前延迟：<span className="text-[var(--foreground)]">{formatAdminLatency(sksDetail.publicView?.current.totalMs)}</span></p>
                           <p>7 天成功率：<span className="text-[var(--foreground)]">{sksDetail.publicView ? `${sksDetail.publicView.stats7d.successRate.toFixed(1)}%` : "—"}</span></p>
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button type="button" disabled={sksActionLoading !== ""} className="btn-glass" onClick={() => updateSksSiteMeta("edit")}>
+                            {sksActionLoading === "edit" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}保存修改
+                          </button>
+                          <button type="button" disabled={sksActionLoading !== ""} className="btn-glass" onClick={() => updateSksSiteMeta(sksDetail.site.statusVisibility === "private" ? "resume" : "pause")}>
+                            {sksActionLoading === "pause" || sksActionLoading === "resume" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            {sksDetail.site.statusVisibility === "private" ? "恢复站点" : "暂停站点"}
+                          </button>
+                          <button type="button" disabled={sksActionLoading !== ""} className="btn-glass" onClick={() => removeSksSite()}>
+                            {sksActionLoading === "delete" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}删除站点
+                          </button>
                         </div>
                       </div>
 
@@ -1422,22 +1538,20 @@ export default function AdminPage() {
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <p className="font-semibold text-[var(--foreground)]">当前模型列表</p>
-                          <p className="mt-1 text-xs text-[var(--muted)]">点击模型名称可直接填充到右侧“单模型测试”输入框。</p>
+                          <p className="mt-1 text-xs text-[var(--muted)]">这里展示该站点当前已记录的模型清单。</p>
                         </div>
                         <span className="text-xs text-[var(--muted)]">共 {sksDetail.models.length} 个模型</span>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {sksDetail.models.length > 0 ? sksDetail.models.map((model) => (
-                          <button
+                          <span
                             key={model.id}
-                            type="button"
-                            onClick={() => setSksActionForm((prev) => ({ ...prev, manualModelName: model.modelName }))}
-                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${sksActionForm.manualModelName === model.modelName ? "border-[var(--accent)] bg-[var(--accent-soft)]/50 text-[var(--foreground)]" : "border-[var(--border-color)] bg-[var(--background)]/70 text-[var(--muted)] hover:text-[var(--foreground)]"}`}
+                            className="inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--background)]/70 px-3 py-1 text-xs text-[var(--muted)]"
                           >
                             <span>{model.modelName}</span>
                             {model.isHot ? <span className="rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[10px] text-white">hot</span> : null}
-                          </button>
-                        )) : <span className="text-xs text-[var(--muted)]">当前暂无模型记录，先执行一次模型列表同步。</span>}
+                          </span>
+                        )) : <span className="text-xs text-[var(--muted)]">当前暂无模型记录。</span>}
                       </div>
                     </div>
                   </div>
@@ -1445,7 +1559,9 @@ export default function AdminPage() {
                   <p className="text-sm text-[var(--muted)]">请先在上方选择一个 SKS 站点。</p>
                 )}
               </section>
+            </div>
 
+            <div className="space-y-6">
               <section className="admin-card p-6 space-y-4">
                 <div>
                   <h3 className="text-base font-semibold">近期探测记录</h3>
@@ -1476,51 +1592,6 @@ export default function AdminPage() {
               </section>
             </div>
 
-            <div className="space-y-6">
-              <section className="admin-card p-6 space-y-4">
-                <div>
-                  <h3 className="text-base font-semibold">调试动作</h3>
-                  <p className="mt-1 text-sm text-[var(--muted)]">支持切换凭据、同步模型列表、运行全量探测，以及对单个模型做独立测试。</p>
-                </div>
-
-                {sksDetail ? (
-                  <div className="space-y-4">
-                    <label className="space-y-2"><span className="admin-label">使用凭据</span><select className="admin-input" value={sksActionForm.credentialId} onChange={(e) => setSksActionForm((prev) => ({ ...prev, credentialId: e.target.value }))}><option value="">自动选择优先凭据</option>{sksDetail.credentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.label || credential.apiKeyPreview} · {credential.apiKeyPreview}</option>)}</select></label>
-                    <label className="space-y-2"><span className="admin-label">全量探测模型数</span><input type="number" min={1} className="admin-input" value={sksActionForm.modelLimit} onChange={(e) => setSksActionForm((prev) => ({ ...prev, modelLimit: Number(e.target.value) }))} /></label>
-                    <label className="space-y-2"><span className="admin-label">强制模型（仅全量探测使用，逗号或换行分隔）</span><textarea className="admin-input min-h-24" value={sksActionForm.forceModels} onChange={(e) => setSksActionForm((prev) => ({ ...prev, forceModels: e.target.value }))} placeholder="gpt-4o-mini&#10;claude-3-5-sonnet" /></label>
-                    <label className="space-y-2"><span className="admin-label">单模型测试</span><input className="admin-input" value={sksActionForm.manualModelName} onChange={(e) => setSksActionForm((prev) => ({ ...prev, manualModelName: e.target.value }))} placeholder="输入模型名后执行 test_model" /></label>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" disabled={sksActionLoading !== ""} className="btn-glass" onClick={() => runSksSiteAction("sync_models")}>
-                        {sksActionLoading === "sync_models" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}同步模型列表
-                      </button>
-                      <button type="button" disabled={sksActionLoading !== ""} className="btn-glass btn-glass-primary" onClick={() => runSksSiteAction("run_probe")}>
-                        {sksActionLoading === "run_probe" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}运行全量探测
-                      </button>
-                      <button type="button" disabled={sksActionLoading !== ""} className="btn-glass" onClick={() => runSksSiteAction("test_model")}>
-                        {sksActionLoading === "test_model" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUpRight className="h-4 w-4" />}测试单模型
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-[var(--muted)]">请选择一个 SKS 站点后再执行动作。</p>
-                )}
-              </section>
-
-              <section className="admin-card p-6 space-y-4">
-                <div>
-                  <h3 className="text-base font-semibold">最近一次动作结果</h3>
-                  <p className="mt-1 text-sm text-[var(--muted)]">保留最近一次导入 / 同步 / 探测 / 单模型测试的返回结果，便于快速核对。</p>
-                </div>
-                {sksLastActionResult ? (
-                  <>
-                    <p className="text-sm font-medium text-[var(--foreground)]">{sksLastActionResult.title}</p>
-                    <pre className="max-h-[32rem] overflow-auto rounded-2xl border border-[var(--border-color)] bg-[var(--background)]/80 p-4 text-xs leading-6 text-[var(--muted)]">{stringifyActionPayload(sksLastActionResult.payload)}</pre>
-                  </>
-                ) : (
-                  <p className="text-sm text-[var(--muted)]">还没有执行过 SKS 调试动作。</p>
-                )}
-              </section>
-            </div>
           </section>
         </>
       )}
