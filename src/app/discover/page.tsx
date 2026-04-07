@@ -6,8 +6,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as HoverCardPrimitives from "@radix-ui/react-hover-card";
 import { ArrowRightLeft, ChevronDown, ExternalLink, Gauge, Search, SlidersHorizontal } from "lucide-react";
+import { FavoriteSiteButton } from "@/components/FavoriteSiteButton";
+import { NoticeModal } from "@/components/NoticeModal";
 import { Tracker } from "@/components/Tracker";
 import { getMessages } from "@/lib/i18n";
+import {
+  FAVORITES_CHANGED_EVENT,
+  FAVORITES_FILTER_CHANGED_EVENT,
+} from "@/lib/favorites-client";
 import {
   adaptSiteCatalogRecord,
   formatProviderFamily,
@@ -627,11 +633,39 @@ export default function DiscoverPage() {
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [selectedFilters, setSelectedFilters] = useState<Record<FilterKey, string[]>>(createEmptyFilters);
   const [selectedCompareKeys, setSelectedCompareKeys] = useState<string[]>([]);
+  const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]);
+  const [noticeMessage, setNoticeMessage] = useState("");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [siteDetails, setSiteDetails] = useState<Record<string, SiteDetail | null | undefined>>({});
   const [siteDetailLoading, setSiteDetailLoading] = useState<Record<string, boolean>>({});
   const [siteDetailFetchedAt, setSiteDetailFetchedAt] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const loadFavorites = async () => {
+      try {
+        const response = await fetch("/api/favorites", { credentials: "include", cache: "no-store" });
+        const result = await response.json();
+        setFavoriteKeys(Array.isArray(result.data?.favorites) ? result.data.favorites : []);
+      } catch {
+        setFavoriteKeys([]);
+      }
+    };
+
+    const handleFavoritesChange = () => {
+      void loadFavorites();
+    };
+
+    void loadFavorites();
+    window.addEventListener(FAVORITES_CHANGED_EVENT, handleFavoritesChange);
+    window.addEventListener(FAVORITES_FILTER_CHANGED_EVENT, handleFavoritesChange);
+    window.addEventListener("storage", handleFavoritesChange);
+    return () => {
+      window.removeEventListener(FAVORITES_CHANGED_EVENT, handleFavoritesChange);
+      window.removeEventListener(FAVORITES_FILTER_CHANGED_EVENT, handleFavoritesChange);
+      window.removeEventListener("storage", handleFavoritesChange);
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -1181,6 +1215,11 @@ export default function DiscoverPage() {
                             <InlineHoverTooltip content={site.visitUrl || site.displayUrl} align="start">
                               <span className="max-w-full truncate text-[15px] font-semibold text-[var(--foreground)]">{site.name}</span>
                             </InlineHoverTooltip>
+                            <FavoriteSiteButton
+                              siteKey={site.siteKey}
+                              initialFavorited={favoriteKeys.includes(site.siteKey)}
+                              onNotice={setNoticeMessage}
+                            />
                             <span
                               className="inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium"
                               style={makeBadgeStyle(getStatusColor(site.displayStatus))}
@@ -1323,6 +1362,8 @@ export default function DiscoverPage() {
           )}
         </div>
       </section>
+
+      <NoticeModal message={noticeMessage} open={Boolean(noticeMessage)} onClose={() => setNoticeMessage("")} />
     </div>
   );
 }
