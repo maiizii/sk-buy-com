@@ -674,10 +674,15 @@ function ComparePageContent() {
               </div>
               <div className="flex flex-wrap gap-2 pt-1">
                 {site.visitUrl ? (
-                  <a href={site.visitUrl} className="btn-glass" target="_blank" rel="noopener noreferrer">
+                  <Link
+                    href={`/visit/site/${encodeURIComponent(site.siteKey)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-glass"
+                  >
                     <ExternalLink className="h-3.5 w-3.5" />
                     {t.common.visit}
-                  </a>
+                  </Link>
                 ) : (
                   <span className="btn-glass cursor-not-allowed opacity-50">
                     <ExternalLink className="h-3.5 w-3.5" />

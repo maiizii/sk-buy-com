@@ -313,6 +313,10 @@ function recommendationTagColor(label: string) {
   return undefined;
 }
 
+function getSiteCategoryDisplayLabel(label: string) {
+  return label === "新站上线" ? "新站收录" : label;
+}
+
 function addTag(target: Map<string, HomeSiteTag>, key: string, tag: Omit<HomeSiteTag, "key">) {
   const normalizedLabel = String(tag.label || "").trim();
   if (!normalizedLabel || target.has(normalizedLabel)) return;
@@ -538,7 +542,7 @@ function buildBadge(site: SiteCatalogSiteCardView): HomeSiteBadge {
   if (site.computed.displayStatus === "failed") {
     return {
       tag: "dead",
-      label: site.computed.operationalStatusLabel || "疑似停运",
+      label: getSiteCategoryDisplayLabel(site.computed.operationalStatusLabel || "疑似停运"),
       color: getStatusColor(site.computed.displayStatus),
     };
   }
@@ -546,14 +550,14 @@ function buildBadge(site: SiteCatalogSiteCardView): HomeSiteBadge {
   if (site.computed.operationalStatusLabel === "长期稳定") {
     return {
       tag: "premium",
-      label: site.computed.operationalStatusLabel,
+      label: getSiteCategoryDisplayLabel(site.computed.operationalStatusLabel),
       color: "#8b5cf6",
     };
   }
 
   return {
     tag: "stable",
-    label: site.computed.operationalStatusLabel || "正常运营",
+    label: getSiteCategoryDisplayLabel(site.computed.operationalStatusLabel || "正常运营"),
     color: getStatusColor(site.computed.displayStatus),
   };
 }
@@ -648,7 +652,7 @@ function adaptSiteCard(site: SiteCatalogSiteCardView, messages: Messages): HomeS
       .join(" ")
       .toLowerCase(),
     description,
-    operationalStatusLabel: site.computed.operationalStatusLabel || "正常运营",
+    operationalStatusLabel: getSiteCategoryDisplayLabel(site.computed.operationalStatusLabel || "正常运营"),
     displayStatus: site.computed.displayStatus,
     statusColor,
     siteStatusText: getStatusText(site.computed.displayStatus),
@@ -931,16 +935,16 @@ export default function Home() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       {site.visitUrl ? (
-                        <a
-                          href={site.visitUrl}
-                          className="btn-glass"
+                        <Link
+                          href={`/visit/site/${encodeURIComponent(site.siteKey)}`}
                           target="_blank"
                           rel="noopener noreferrer"
+                          className="btn-glass"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                           {t.common.visit}
-                        </a>
+                        </Link>
                       ) : null}
                       {site.reviewUrl ? (
                         <Link href={site.reviewUrl} className="btn-glass" onClick={(e) => e.stopPropagation()}>

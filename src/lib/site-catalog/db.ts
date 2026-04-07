@@ -426,6 +426,31 @@ export function updateSiteCatalogSiteByHostname(
   return getSiteCatalogSiteByHostname(existing.normalizedHostname);
 }
 
+export function incrementSiteCatalogVisitCount(siteKey: string) {
+  const existing = getSiteCatalogSiteByHostname(siteKey);
+  if (!existing) return null;
+
+  let meta: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(existing.metaJson || "{}");
+    meta = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    meta = {};
+  }
+
+  const currentVisitCount = typeof meta.visitCount === "number" ? meta.visitCount : 0;
+  meta.visitCount = currentVisitCount + 1;
+
+  db.prepare(
+    `UPDATE site_catalog_sites
+     SET metaJson = ?,
+         updatedAt = ?
+     WHERE normalizedHostname = ? OR hostname = ?`
+  ).run(JSON.stringify(meta), toDbTimestamp(), existing.normalizedHostname, existing.hostname);
+
+  return getSiteCatalogSiteByHostname(existing.normalizedHostname);
+}
+
 export function deleteSiteCatalogSiteByHostname(siteKey: string) {
   const existing = getSiteCatalogSiteByHostname(siteKey);
   if (!existing) return false;
