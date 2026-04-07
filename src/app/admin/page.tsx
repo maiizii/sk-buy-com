@@ -1369,11 +1369,12 @@ export default function AdminPage() {
                   {sksSites.map((item) => {
                     const siteKey = item.site.normalizedHostname || item.site.id;
                     const isActive = selectedSksSiteKey === siteKey;
+                    const isPaused = item.site.statusVisibility === "private";
                     const statusMeta = getSksStatusMeta(item.currentStatus);
                     return (
                       <div
                         key={item.site.id}
-                        className={`rounded-2xl border p-4 transition ${isActive ? "border-[var(--accent)] bg-[var(--accent-soft)]/40 ring-2 ring-[var(--accent)]/15" : "border-[var(--border-color)] hover:border-[var(--accent)]/40 hover:bg-[var(--card-hover)]"}`}
+                        className={`rounded-2xl border p-4 transition ${isPaused ? "border-slate-400/30 bg-slate-200/60 text-slate-700 dark:border-slate-700/60 dark:bg-slate-800/70 dark:text-slate-300" : ""} ${isActive ? "border-[var(--accent)] bg-[var(--accent-soft)]/40 ring-2 ring-[var(--accent)]/15" : isPaused ? "" : "border-[var(--border-color)] hover:border-[var(--accent)]/40 hover:bg-[var(--card-hover)]"}`}
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <button
@@ -1381,7 +1382,7 @@ export default function AdminPage() {
                             onClick={() => {
                               setSelectedSksSiteKey(siteKey);
                             }}
-                            className="flex-1 text-left"
+                            className="flex-1 cursor-pointer text-left"
                           >
                             <div>
                               <p className="font-semibold text-[var(--foreground)]">{item.site.displayName}</p>
@@ -1389,7 +1390,7 @@ export default function AdminPage() {
                             </div>
                           </button>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${statusMeta.className}`}>{statusMeta.label}</span>
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${isPaused ? "border-slate-400/40 bg-slate-500/10 text-slate-600 dark:border-slate-600/50 dark:bg-slate-700/40 dark:text-slate-300" : statusMeta.className}`}>{isPaused ? "已暂停" : statusMeta.label}</span>
                             <button type="button" className="btn-glass" onClick={() => refreshSksSiteProbe(siteKey)} disabled={sksActionLoading !== ""}>
                               {sksActionLoading === "probe" && selectedSksSiteKey === siteKey ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                               刷新检测

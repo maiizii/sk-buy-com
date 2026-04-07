@@ -3,6 +3,7 @@ import { updateSiteCatalogSiteByHostname, deleteSiteCatalogSiteByHostname } from
 import { deleteSksSite, updateSksSite } from "@/lib/sks/db";
 import { runSksFullProbe, syncSksSiteModels, testSksModel } from "@/lib/sks/probe";
 import { getSksAdminSiteView } from "@/lib/sks/service";
+import { syncSksSubmissionStatusForSite } from "@/lib/sks/submission";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,7 @@ export async function POST(
           ? body.forceModels.map((item: unknown) => String(item).trim()).filter(Boolean)
           : undefined,
       });
+      syncSksSubmissionStatusForSite(siteKey);
       return createJsonResponse({ success: true, data: result });
     }
 
@@ -142,6 +144,10 @@ export async function PUT(
             : "public",
       catalogStatus: mode === "pause" ? "hidden" : mode === "resume" ? "active" : undefined,
     });
+
+    if (mode === "resume") {
+      syncSksSubmissionStatusForSite(nextSite.normalizedHostname || nextSite.id);
+    }
 
     const detail = getSksAdminSiteView(nextSite.normalizedHostname || nextSite.id);
     return createJsonResponse({ success: true, data: detail });

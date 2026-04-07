@@ -935,6 +935,21 @@ export function listSksUserSubmissionsByUser(userId: number) {
   return rows.map(rowToUserSubmission);
 }
 
+export function listSksUserSubmissionsByHostname(hostname: string) {
+  const normalizedHostname = normalizeHostname(hostname);
+  if (!normalizedHostname) return [];
+
+  const rows = db
+    .prepare(
+      `SELECT *
+       FROM sks_user_submissions
+       WHERE normalizedHostname = ? OR hostname = ?
+       ORDER BY datetime(createdAt) DESC, id DESC`
+    )
+    .all(normalizedHostname, normalizedHostname) as SksUserSubmissionRow[];
+  return rows.map(rowToUserSubmission);
+}
+
 export function createSksUserSubmission(input: {
   userId: number;
   hostname: string;

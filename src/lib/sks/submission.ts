@@ -1,11 +1,13 @@
 import { getSiteCatalogSiteByHostname, upsertSiteCatalogSite } from "@/lib/site-catalog/db";
 import { importSiteCatalogEntry } from "@/lib/site-catalog/service";
+import { runSksModelVerification, syncSksSiteModels } from "@/lib/sks/probe";
 import {
   createSksUserSubmission,
   deleteSksUserSubmission,
   getResolvedSksUserSubmissionById,
   getSksSiteRecordById,
   getSksSiteRecordByKey,
+  listSksUserSubmissionsByHostname,
   listSksUserSubmissionsByUser,
   setSksUserSubmissionResult,
   upsertSksSite,
@@ -31,11 +33,13 @@ function isHealthyStatus(status: SksInternalStatus | null | undefined) {
   return status === "ok" || status === "slow";
 }
 
-function isInitialProbeAccepted(result: SksFullProbeResult | null) {
-  if (!result?.modelListProbe) return false;
-  if (!isHealthyStatus(result.modelListProbe.status)) return false;
-  if (result.testedModels.length === 0) return false;
-  return result.testedModels.every((probe) => isHealthyStatus(probe.status));
+function isBasicSubmissionAccepted(input: {
+  modelListProbe: { status: SksInternalStatus } | null | undefined;
+  syncedModels: string[] | null | undefined;
+}) {
+  if (!input.modelListProbe) return false;
+  if (!isHealthyStatus(input.modelListProbe.status)) return false;
+  return Array.isArray(input.syncedModels) && input.syncedModels.length > 0;
 }
 
 function resolveFailureMessage(input: {
@@ -171,15 +175,39 @@ function isRetryableSubmission(submission: SksUserSubmissionRecord) {
   return !resolveSubmissionSite(submission);
 }
 
-function buildSubmissionView(submission: SksUserSubmissionRecord): SksUserSubmissionView {
+function reconcileSubmissionStatus(submission: SksUserSubmissionRecord) {
   const site = resolveSubmissionSite(submission);
+  if (!site || site.statusVisibility !== "public") {
+    return submission;
+  }
+
+  if (submission.status === "approved" && submission.siteId === site.id) {
+    return submission;
+  }
+
+  return (
+    setSksUserSubmissionResult(submission.id, {
+      status: "approved",
+      lastMessage: "站点已恢复公开展示，申请记录已自动同步为成功",
+      siteId: site.id,
+      displayName: site.displayName,
+      homepageUrl: site.homepageUrl,
+      apiBaseUrl: site.apiBaseUrl,
+      validatedAt: toDbTimestamp(),
+    }) || submission
+  );
+}
+
+function buildSubmissionView(submission: SksUserSubmissionRecord): SksUserSubmissionView {
+  const reconciledSubmission = reconcileSubmissionStatus(submission);
+  const site = resolveSubmissionSite(reconciledSubmission);
   const publicView =
-    submission.status === "approved" && site?.statusVisibility === "public"
+    reconciledSubmission.status === "approved" && site?.statusVisibility === "public"
       ? getSksSiteByKey(site.normalizedHostname || site.id)
       : null;
 
   return {
-    submission,
+    submission: reconciledSubmission,
     site,
     publicView,
     callOptions: publicView
@@ -190,6 +218,45 @@ function buildSubmissionView(submission: SksUserSubmissionRecord): SksUserSubmis
 
 export function listSksUserSubmissionViews(userId: number): SksUserSubmissionView[] {
   return listSksUserSubmissionsByUser(userId).map(buildSubmissionView);
+}
+
+export function syncSksSubmissionStatusForSite(siteKey: string) {
+  const site = getSksSiteRecordByKey(siteKey);
+  if (!site) {
+    return { updatedCount: 0, site: null };
+  }
+
+  const hostname = site.normalizedHostname || site.hostname || site.id;
+  const submissions = listSksUserSubmissionsByHostname(hostname);
+  let updatedCount = 0;
+
+  for (const submission of submissions) {
+    if (submission.status === "approved" && submission.siteId === site.id) {
+      continue;
+    }
+
+    const nextStatus = site.statusVisibility === "public" ? "approved" : submission.status;
+    const nextMessage =
+      site.statusVisibility === "public"
+        ? "后台已恢复并重新检测通过，站点已重新收录"
+        : submission.lastMessage;
+
+    const updated = setSksUserSubmissionResult(submission.id, {
+      status: nextStatus,
+      lastMessage: nextMessage,
+      siteId: site.id,
+      displayName: site.displayName,
+      homepageUrl: site.homepageUrl,
+      apiBaseUrl: site.apiBaseUrl,
+      validatedAt: site.statusVisibility === "public" ? toDbTimestamp() : submission.validatedAt,
+    });
+
+    if (updated) {
+      updatedCount += 1;
+    }
+  }
+
+  return { updatedCount, site };
 }
 
 async function submitSksSiteForSubmission(input: {
@@ -273,7 +340,7 @@ async function submitSksSiteForSubmission(input: {
       platformType: existingSite?.platformType || existingCatalog?.siteSystem || "openai-compatible",
       sourceStage: existingCatalog?.sourceStage || "website",
       sourceModule: "user-submission",
-      visibility: existingCatalog?.visibility || "private",
+      visibility: existingSite?.statusVisibility || existingCatalog?.visibility || "unlisted",
       catalogStatus: existingCatalog?.catalogStatus || "pending",
       summary: existingCatalog?.summary,
       description: existingCatalog?.description,
@@ -291,13 +358,30 @@ async function submitSksSiteForSubmission(input: {
       label: `用户提交 · ${hostname}`,
       isEnabled: true,
       priorityScore: 120,
-      runInitialProbe: true,
-      allowPrivateProbe: existingSite?.statusVisibility === "private",
+      runInitialProbe: false,
     });
 
-    const approved = !imported.probeError && isInitialProbeAccepted(imported.initialProbe);
+    let basicProbeError: string | null = null;
+    let basicProbeResult: Awaited<ReturnType<typeof syncSksSiteModels>> | null = null;
 
-    if (approved) {
+    if (imported.sksImport?.credential.id) {
+      try {
+        basicProbeResult = await syncSksSiteModels(imported.catalogSite.normalizedHostname, {
+          credentialId: imported.sksImport.credential.id,
+        });
+      } catch (error) {
+        basicProbeError = error instanceof Error ? error.message : "首次基础验证失败";
+      }
+    } else {
+      basicProbeError = "站点导入成功，但未找到可用凭据";
+    }
+
+    const approved = !basicProbeError && isBasicSubmissionAccepted({
+      modelListProbe: basicProbeResult?.probe,
+      syncedModels: basicProbeResult?.models,
+    });
+
+    if (approved && basicProbeResult) {
       const publishedCatalog = upsertSiteCatalogSite({
         displayName: imported.catalogSite.displayName,
         homepageUrl: imported.catalogSite.homepageUrl,
@@ -339,7 +423,7 @@ async function submitSksSiteForSubmission(input: {
       const approvedSubmission =
         setSksUserSubmissionResult(submission.id, {
           status: "approved",
-          lastMessage: "检测通过，已收录成功",
+          lastMessage: "基础验证通过，已收录成功；模型可用性正在后台继续检测",
           siteId: imported.sksImport?.site.id || publishedSite.id,
           credentialId: imported.sksImport?.credential.id ?? null,
           displayName: publishedCatalog.displayName,
@@ -347,16 +431,24 @@ async function submitSksSiteForSubmission(input: {
           validatedAt: toDbTimestamp(),
         }) || submission;
 
+      void runSksModelVerification(imported.catalogSite.normalizedHostname, {
+        credentialId: imported.sksImport?.credential.id ?? undefined,
+      }).catch((error) => {
+        console.error("[sks/submission] background model verification failed:", error);
+      });
+
       return buildSubmissionView(approvedSubmission);
     }
 
     const failedSubmission =
       setSksUserSubmissionResult(submission.id, {
         status: "failed",
-        lastMessage: resolveFailureMessage({
-          probeError: imported.probeError,
-          initialProbe: imported.initialProbe,
-        }),
+        lastMessage:
+          basicProbeError ||
+          resolveFailureMessage({
+            probeError: imported.probeError,
+            initialProbe: imported.initialProbe,
+          }),
         siteId: imported.sksImport?.site.id ?? null,
         credentialId: imported.sksImport?.credential.id ?? null,
         displayName: imported.catalogSite.displayName,

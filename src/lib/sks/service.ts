@@ -246,6 +246,10 @@ export function getSksSiteByKey(siteKey: string): SksSiteDetailView | null {
 
 export function getSksAdminList(): SksSiteAdminListItem[] {
   return getSksAdminSiteList().sort((a, b) => {
+    const aPaused = a.site.statusVisibility === "private";
+    const bPaused = b.site.statusVisibility === "private";
+    if (aPaused !== bPaused) return aPaused ? 1 : -1;
+
     const statusDiff = getStatusRank(a.currentStatus) - getStatusRank(b.currentStatus);
     if (statusDiff !== 0) return statusDiff;
     return a.site.displayName.localeCompare(b.site.displayName, "zh-CN");

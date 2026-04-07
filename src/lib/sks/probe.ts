@@ -402,7 +402,7 @@ export async function testSksModel(
   };
 }
 
-export async function runSksFullProbe(
+export async function runSksModelVerification(
   siteKey: string,
   options: {
     credentialId?: string | null;
@@ -411,24 +411,24 @@ export async function runSksFullProbe(
     fallbackToCurrentModels?: boolean;
     allowPrivateProbe?: boolean;
   } = {}
-): Promise<SksFullProbeResult> {
-  const syncResult = await syncSksSiteModels(siteKey, {
-    credentialId: options.credentialId,
-    allowPrivateProbe: options.allowPrivateProbe,
-  });
+) {
+  const site = getSksSiteRecordByKey(siteKey);
+  if (!site) {
+    throw new Error("站点不存在");
+  }
 
-  const fallbackModels = listSksSiteModels(syncResult.site.id, {
+  const currentModels = listSksSiteModels(site.id, {
     currentlyListedOnly: true,
   }).map((item) => item.modelName);
 
   const forcedModels = dedupeStrings(options.forceModels || []);
   const candidateModels = forcedModels.length > 0
     ? forcedModels
-    : syncResult.models.length > 0
-      ? dedupeStrings(syncResult.models)
+    : currentModels.length > 0
+      ? dedupeStrings(currentModels)
       : options.fallbackToCurrentModels === false
         ? []
-        : dedupeStrings(fallbackModels);
+        : dedupeStrings(currentModels);
 
   const modelLimit =
     typeof options.modelLimit === "number" && Number.isFinite(options.modelLimit)
@@ -446,10 +446,39 @@ export async function runSksFullProbe(
   }
 
   return {
+    site,
+    testedModels,
+  };
+}
+
+export async function runSksFullProbe(
+  siteKey: string,
+  options: {
+    credentialId?: string | null;
+    modelLimit?: number;
+    forceModels?: string[];
+    fallbackToCurrentModels?: boolean;
+    allowPrivateProbe?: boolean;
+  } = {}
+): Promise<SksFullProbeResult> {
+  const syncResult = await syncSksSiteModels(siteKey, {
+    credentialId: options.credentialId,
+    allowPrivateProbe: options.allowPrivateProbe,
+  });
+
+  const verificationResult = await runSksModelVerification(siteKey, {
+    credentialId: options.credentialId,
+    modelLimit: options.modelLimit,
+    forceModels: options.forceModels,
+    fallbackToCurrentModels: options.fallbackToCurrentModels,
+    allowPrivateProbe: options.allowPrivateProbe,
+  });
+
+  return {
     site: syncResult.site,
     credential: syncResult.credential,
     modelListProbe: syncResult.probe,
     syncedModels: syncResult.models,
-    testedModels,
+    testedModels: verificationResult.testedModels,
   };
 }
