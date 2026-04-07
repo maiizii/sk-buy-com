@@ -1661,7 +1661,7 @@ function seedPlatformConfig() {
 
 function seedData() {
   if (!getAppSetting("detection.proxy.url")) {
-    setAppSetting("detection.proxy.url", "socks5://142.171.148.74:37501:rKHJBadWPn:qgSWncTfNL");
+    setAppSetting("detection.proxy.url", "socks5://rKHJBadWPn:qgSWncTfNL@142.171.148.74:37501");
   }
 
   const platformCount = (db.prepare(`SELECT COUNT(*) as count FROM platforms`).get() as { count: number }).count;
