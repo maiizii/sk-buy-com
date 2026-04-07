@@ -5,8 +5,6 @@ import { getAppSetting, setAppSetting } from "@/lib/db";
 
 const DETECTION_PROXY_LEGACY_KEY = "detection.proxy.url";
 const DETECTION_PROXY_LIST_KEY = "proxy.pool.detection";
-const DEFAULT_DETECTION_PROXY_RAW = "http://fTdOIjAcjb:Tvp4MO2K7S@142.171.148.74:47312";
-const LEGACY_DEFAULT_SOCKS_PROXY = "socks5://rKHJBadWPn:qgSWncTfNL@142.171.148.74:37501";
 const DETECTION_PROXY_TEMPORARILY_DISABLED = true;
 
 export interface ProxyEntry {
@@ -98,13 +96,8 @@ export function ensureDefaultDetectionProxySetting() {
       .map((line) => normalizeProxyUrl(line))
       .join("\n");
 
-    const migratedPool = normalizedPool
-      .split("\n")
-      .map((line) => (line === LEGACY_DEFAULT_SOCKS_PROXY ? DEFAULT_DETECTION_PROXY_RAW : line))
-      .join("\n");
-
-    if (migratedPool !== poolRaw) {
-      setAppSetting(DETECTION_PROXY_LIST_KEY, migratedPool);
+    if (normalizedPool !== poolRaw) {
+      setAppSetting(DETECTION_PROXY_LIST_KEY, normalizedPool);
     }
     return;
   }
@@ -112,13 +105,9 @@ export function ensureDefaultDetectionProxySetting() {
   if (legacyRaw) {
     const normalizedLegacy = dedupeStrings(splitProxyLines(legacyRaw))
       .map((line) => normalizeProxyUrl(line))
-      .map((line) => (line === LEGACY_DEFAULT_SOCKS_PROXY ? DEFAULT_DETECTION_PROXY_RAW : line))
       .join("\n");
     setAppSetting(DETECTION_PROXY_LIST_KEY, normalizedLegacy);
-    return;
   }
-
-  setAppSetting(DETECTION_PROXY_LIST_KEY, DEFAULT_DETECTION_PROXY_RAW);
 }
 
 export function getDetectionProxyConfig(): DetectionProxyConfig {
