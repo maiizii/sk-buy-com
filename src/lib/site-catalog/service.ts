@@ -164,7 +164,9 @@ export function getPublicSiteCatalogDetail(siteKey: string): SiteCatalogSiteDeta
         current: sksDetail.current,
         models: sksDetail.models,
         stats7d: sksDetail.stats7d,
+        stats30d: sksDetail.stats30d,
         grid: sksDetail.grid,
+        dailyGrid: sksDetail.dailyGrid,
       }
     : null;
 
