@@ -1,9 +1,12 @@
+import { HttpProxyAgent } from "http-proxy-agent";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { getAppSetting, setAppSetting } from "@/lib/db";
 
 const DETECTION_PROXY_LEGACY_KEY = "detection.proxy.url";
 const DETECTION_PROXY_LIST_KEY = "proxy.pool.detection";
-const DEFAULT_DETECTION_PROXY_RAW = "socks5://rKHJBadWPn:qgSWncTfNL@142.171.148.74:37501";
+const DEFAULT_DETECTION_PROXY_RAW = "http://fTdOIjAcjb:Tvp4MO2K7S@142.171.148.74:47312";
+const LEGACY_DEFAULT_SOCKS_PROXY = "socks5://rKHJBadWPn:qgSWncTfNL@142.171.148.74:37501";
 
 export interface ProxyEntry {
   raw: string;
@@ -93,8 +96,14 @@ export function ensureDefaultDetectionProxySetting() {
     const normalizedPool = dedupeStrings(splitProxyLines(poolRaw))
       .map((line) => normalizeProxyUrl(line))
       .join("\n");
-    if (normalizedPool !== poolRaw) {
-      setAppSetting(DETECTION_PROXY_LIST_KEY, normalizedPool);
+
+    const migratedPool = normalizedPool
+      .split("\n")
+      .map((line) => (line === LEGACY_DEFAULT_SOCKS_PROXY ? DEFAULT_DETECTION_PROXY_RAW : line))
+      .join("\n");
+
+    if (migratedPool !== poolRaw) {
+      setAppSetting(DETECTION_PROXY_LIST_KEY, migratedPool);
     }
     return;
   }
@@ -102,6 +111,7 @@ export function ensureDefaultDetectionProxySetting() {
   if (legacyRaw) {
     const normalizedLegacy = dedupeStrings(splitProxyLines(legacyRaw))
       .map((line) => normalizeProxyUrl(line))
+      .map((line) => (line === LEGACY_DEFAULT_SOCKS_PROXY ? DEFAULT_DETECTION_PROXY_RAW : line))
       .join("\n");
     setAppSetting(DETECTION_PROXY_LIST_KEY, normalizedLegacy);
     return;
@@ -128,7 +138,22 @@ export function getDetectionProxyAgent() {
     return null;
   }
 
-  return new SocksProxyAgent(config.selected.normalizedUrl);
+  const proxyUrl = config.selected.normalizedUrl;
+  const protocol = new URL(proxyUrl).protocol.toLowerCase();
+
+  if (protocol.startsWith("socks")) {
+    return new SocksProxyAgent(proxyUrl);
+  }
+
+  if (protocol === "http:") {
+    return new HttpProxyAgent(proxyUrl);
+  }
+
+  if (protocol === "https:") {
+    return new HttpsProxyAgent(proxyUrl);
+  }
+
+  throw new Error(`不支持的代理协议: ${protocol}`);
 }
 
 export function getSelectedDetectionProxyMaskedUrl() {
