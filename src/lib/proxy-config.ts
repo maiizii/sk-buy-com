@@ -1,4 +1,4 @@
-import { ProxyAgent } from "proxy-agent";
+import { SocksProxyAgent } from "socks-proxy-agent";
 import { getAppSetting, setAppSetting } from "@/lib/db";
 
 const DETECTION_PROXY_LEGACY_KEY = "detection.proxy.url";
@@ -128,9 +128,7 @@ export function getDetectionProxyAgent() {
     return null;
   }
 
-  return new ProxyAgent({
-    getProxyForUrl: () => config.selected?.normalizedUrl || "",
-  });
+  return new SocksProxyAgent(config.selected.normalizedUrl);
 }
 
 export function setDetectionProxy(rawProxyUrl: string | null | undefined) {
