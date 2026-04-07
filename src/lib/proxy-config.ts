@@ -7,6 +7,7 @@ const DETECTION_PROXY_LEGACY_KEY = "detection.proxy.url";
 const DETECTION_PROXY_LIST_KEY = "proxy.pool.detection";
 const DEFAULT_DETECTION_PROXY_RAW = "http://fTdOIjAcjb:Tvp4MO2K7S@142.171.148.74:47312";
 const LEGACY_DEFAULT_SOCKS_PROXY = "socks5://rKHJBadWPn:qgSWncTfNL@142.171.148.74:37501";
+const DETECTION_PROXY_TEMPORARILY_DISABLED = true;
 
 export interface ProxyEntry {
   raw: string;
@@ -124,6 +125,14 @@ export function getDetectionProxyConfig(): DetectionProxyConfig {
   ensureDefaultDetectionProxySetting();
   const raw = toNonEmptyString(getAppSetting(DETECTION_PROXY_LIST_KEY));
   const entries = buildProxyEntries(splitProxyLines(raw));
+
+  if (DETECTION_PROXY_TEMPORARILY_DISABLED) {
+    return {
+      enabled: false,
+      entries,
+      selected: null,
+    };
+  }
 
   return {
     enabled: entries.length > 0,
