@@ -301,6 +301,11 @@ function getProviderTagMeta(family: string) {
   };
 }
 
+function getModelFallbackColor(modelName: string) {
+  const family = inferProviderFamilyFromModelName(modelName);
+  return getProviderTagMeta(family).color || DEFAULT_TAG_COLOR;
+}
+
 function recommendationTagColor(label: string) {
   if (label === "免费公益") return "#10b981";
   if (label === "人气权威") return "#8b5cf6";
@@ -420,7 +425,7 @@ function ModelStatusHoverCard({
     ? formatLatencyText(computeAverageLatency(modelStatus.grid, 24) ?? getLatencyValue(modelStatus.current))
     : "--";
   const statusLabel = getStatusText(modelDisplayStatus);
-  const statusColor = getStatusColor(modelDisplayStatus);
+  const statusColor = modelStatus ? getStatusColor(modelDisplayStatus) : getModelFallbackColor(model.label);
   const trackerData = modelStatus
     ? gridToTrackerData(modelStatus.grid, messages.common.noData, messages.common.connectionFailed, 24)
     : generateGreyTrackerData(messages.common.noData, 24);
@@ -744,6 +749,16 @@ export default function Home() {
   };
 
   const homeCards = useMemo(() => sites.map((site) => adaptSiteCard(site, t)), [sites, t]);
+
+  useEffect(() => {
+    const expandedSiteKeys = homeCards
+      .filter((site) => expandedCards[site.id])
+      .map((site) => site.siteKey);
+
+    expandedSiteKeys.forEach((siteKey) => {
+      loadSiteDetail(siteKey);
+    });
+  }, [expandedCards, homeCards]);
 
   const filteredPlatforms = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();

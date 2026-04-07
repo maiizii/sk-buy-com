@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -195,6 +195,11 @@ function getProviderTagMeta(family: string) {
     iconUrl,
     darkIconUrl,
   };
+}
+
+function getModelFallbackColor(modelName: string) {
+  const family = inferProviderFamilyFromModelName(modelName);
+  return getProviderTagMeta(family).color || DEFAULT_TAG_COLOR;
 }
 
 function getLatencyValue(input: { totalMs: number | null; ttfbMs: number | null }) {
@@ -470,7 +475,7 @@ function ModelStatusHoverCard({
     ? formatLatencyText(computeAverageLatency(modelStatus.grid, 24) ?? getLatencyValue(modelStatus.current))
     : "--";
   const statusLabel = getDisplayStatusLabel(modelDisplayStatus);
-  const statusColor = getStatusColor(modelDisplayStatus);
+   const statusColor = modelStatus ? getStatusColor(modelDisplayStatus) : getModelFallbackColor(model.label);
   const trackerData = modelStatus
     ? gridToTrackerData(modelStatus.grid, messages.common.noData, messages.common.connectionFailed, 24)
     : generateGreyTrackerData(messages.common.noData, 24);
@@ -601,7 +606,7 @@ export default function DiscoverPage() {
     };
   }, []);
 
-  const loadSiteDetail = (siteKey: string) => {
+  const loadSiteDetail = useCallback((siteKey: string) => {
     if (siteDetailLoading[siteKey]) return;
 
     const lastFetchedAt = siteDetailFetchedAt[siteKey] || 0;
@@ -628,7 +633,7 @@ export default function DiscoverPage() {
       .finally(() => {
         setSiteDetailLoading((prev) => ({ ...prev, [siteKey]: false }));
       });
-  };
+  }, [siteDetailFetchedAt, siteDetailLoading, siteDetails]);
 
   const filterSections = useMemo(() => {
     const providerMap = new Map<string, FilterOption>();
@@ -749,6 +754,16 @@ export default function DiscoverPage() {
       loadSiteDetail(siteKey);
     }
   };
+
+  useEffect(() => {
+    const expandedSiteKeys = Object.entries(expandedRows)
+      .filter(([, expanded]) => Boolean(expanded))
+      .map(([siteKey]) => siteKey);
+
+    expandedSiteKeys.forEach((siteKey) => {
+      loadSiteDetail(siteKey);
+    });
+  }, [expandedRows, loadSiteDetail]);
 
   const filteredSites = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();

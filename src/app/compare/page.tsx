@@ -30,6 +30,7 @@ const FIXED_COLUMN_WIDTH = 320;
 const STICKY_LABEL_WIDTH = 180;
 const MAX_VISIBLE_COMPARE_COLUMNS = 4;
 const COMPARE_SITE_REFRESH_INTERVAL_MS = 15_000;
+const COMPARE_SITE_LIST_REFRESH_INTERVAL_MS = 15_000;
 const DEFAULT_TAG_COLOR = "#737373";
 const LOBE_LIGHT_ICON_BASE_URL = "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-png@1.85.0/light";
 const LOBE_DARK_ICON_BASE_URL = "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-png@1.85.0/dark";
@@ -197,6 +198,11 @@ function getProviderTagMeta(family: string) {
     iconUrl,
     darkIconUrl,
   };
+}
+
+function getModelFallbackColor(modelName: string) {
+  const family = inferProviderFamilyFromModelName(modelName);
+  return getProviderTagMeta(family).color || DEFAULT_TAG_COLOR;
 }
 
 function getLatencyValue(input: { totalMs: number | null; ttfbMs: number | null }) {
@@ -464,7 +470,7 @@ function ModelStatusHoverCard({
     ? formatLatencyText(computeAverageLatency(modelStatus.grid, 24) ?? getLatencyValue(modelStatus.current))
     : "--";
   const statusLabel = getDisplayStatusLabel(modelDisplayStatus);
-  const statusColor = getStatusColor(modelDisplayStatus);
+  const statusColor = modelStatus ? getStatusColor(modelDisplayStatus) : getModelFallbackColor(model.label);
   const trackerData = modelStatus
     ? gridToTrackerData(modelStatus.grid, messages.common.noData, messages.common.connectionFailed, 24)
     : generateGreyTrackerData(messages.common.noData, 24);
@@ -562,15 +568,32 @@ function ComparePageContent() {
   const syncingRef = useRef(false);
 
   useEffect(() => {
-    fetch("/api/sites", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((result: SitesApiResponse) => {
-        if (result.success && Array.isArray(result.data)) {
+    let disposed = false;
+
+    const requestSites = async () => {
+      try {
+        const response = await fetch("/api/sites", { cache: "no-store" });
+        const result: SitesApiResponse = await response.json();
+
+        if (!disposed && result.success && Array.isArray(result.data)) {
           setSites(result.data.map((site) => adaptSiteCatalogRecord(site)));
         }
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (!disposed) {
+          setLoading(false);
+        }
+      }
+    };
+
+    requestSites();
+    const intervalId = window.setInterval(requestSites, COMPARE_SITE_LIST_REFRESH_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   const selectedKeys = useMemo(() => parseSelectedKeys(searchParams.get("keys")), [searchParams]);
@@ -613,6 +636,12 @@ function ComparePageContent() {
     },
     [siteDetails, siteDetailFetchedAt, siteDetailLoading]
   );
+
+  useEffect(() => {
+    comparedSites.forEach((site) => {
+      loadSiteDetail(site.siteKey);
+    });
+  }, [comparedSites, loadSiteDetail]);
 
   const compareRows = useMemo<CompareRow[]>(() => {
     if (comparedSites.length === 0) return [];
@@ -796,7 +825,9 @@ function ComparePageContent() {
     });
   }, []);
 
+  const requestedSelectionCount = selectedKeys.length;
   const hasSelection = comparedSites.length > 0;
+  const waitingForSelectedSites = requestedSelectionCount > 0 && !hasSelection && (loading || sites.length === 0);
   const hasHorizontalOverflow = comparedSites.length > MAX_VISIBLE_COMPARE_COLUMNS;
   const tableMinWidth = STICKY_LABEL_WIDTH + comparedSites.length * FIXED_COLUMN_WIDTH;
   const stretchedColumnWidth = `calc((100% - ${STICKY_LABEL_WIDTH}px) / ${Math.max(comparedSites.length, 1)})`;
@@ -841,6 +872,10 @@ function ComparePageContent() {
 
         {loading ? (
           <div className="px-6 py-20 text-center text-sm text-[var(--muted)]">{t.common.loading}</div>
+        ) : waitingForSelectedSites ? (
+          <div className="px-6 py-20 text-center text-sm text-[var(--muted)]">
+            <p>正在载入你选中的站点，请稍候…</p>
+          </div>
         ) : !hasSelection ? (
           <div className="px-6 py-20 text-center text-sm text-[var(--muted)]">
             <p>{t.discoverPage.compareEmpty}</p>

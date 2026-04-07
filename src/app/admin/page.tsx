@@ -313,6 +313,22 @@ function getSksStatusMeta(status: string) {
         className:
           "border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300",
       };
+    }
+}
+
+async function readJsonResponse<T>(response: Response, label: string): Promise<T> {
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+
+  if (!contentType.includes("application/json")) {
+    const preview = text.trim().slice(0, 160);
+    throw new Error(`${label} 返回了非 JSON 响应（HTTP ${response.status}）${preview ? `：${preview}` : ""}`);
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`${label} 返回的 JSON 无法解析（HTTP ${response.status}）`);
   }
 }
 
@@ -408,10 +424,10 @@ export default function AdminPage() {
       fetch("/api/site-catalog/admin/sites", { cache: "no-store" }),
     ]);
     const [platformData, configData, sksData, siteCatalogData] = await Promise.all([
-      platformRes.json(),
-      configRes.json(),
-      sksRes.json(),
-      siteCatalogRes.json(),
+      readJsonResponse<{ success: boolean; data: Platform[]; error?: string }>(platformRes, "平台列表接口"),
+      readJsonResponse<{ success: boolean; data: ConfigSummary; error?: string }>(configRes, "平台配置接口"),
+      readJsonResponse<{ success: boolean; data: SksSiteAdminListItem[]; error?: string }>(sksRes, "SKS 管理列表接口"),
+      readJsonResponse<{ success: boolean; data: SiteCatalogAdminRecord[]; error?: string }>(siteCatalogRes, "站点目录接口"),
     ]);
     if (platformData.success) setPlatforms(platformData.data);
     if (configData.success) setConfigSummary(configData.data);
@@ -439,7 +455,7 @@ export default function AdminPage() {
       const res = await fetch(`/api/sks/admin/site/${encodeURIComponent(siteKey)}`, {
         cache: "no-store",
       });
-      const data = await res.json();
+      const data = await readJsonResponse<{ success: boolean; data: SksSiteAdminView; error?: string }>(res, "SKS 站点详情接口");
 
       if (!data.success) {
         throw new Error(data.error || "获取 SKS 站点详情失败");
