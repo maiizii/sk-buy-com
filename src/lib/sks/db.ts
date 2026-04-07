@@ -797,7 +797,7 @@ export function listSksProbeResults(siteId: string, options: SksProbeQueryOption
   }
 
   if (options.onlyFailures) {
-    conditions.push("status NOT IN ('ok', 'slow')");
+    conditions.push("status NOT IN ('ok', 'slow', 'reachable')");
   }
 
   const limit = Math.max(1, Math.floor(options.limit ?? 500));
@@ -880,7 +880,7 @@ export function getSksAdminSiteList(): SksSiteAdminListItem[] {
       currentStatus:
         latestProbe?.status === "ok"
           ? "ok"
-          : latestProbe?.status === "slow"
+          : latestProbe?.status === "slow" || latestProbe?.status === "reachable"
             ? "slow"
             : latestProbe
               ? "failed"

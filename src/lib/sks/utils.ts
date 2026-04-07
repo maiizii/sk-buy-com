@@ -254,7 +254,7 @@ export function chooseHotModels(modelNames: string[], limit: number = 6) {
 export function getDisplayStatusFromInternal(status: SksInternalStatus | null | undefined): SksDisplayStatus {
   if (!status) return "unknown";
   if (status === "ok") return "ok";
-  if (status === "slow") return "slow";
+  if (status === "slow" || status === "reachable") return "slow";
   return "failed";
 }
 

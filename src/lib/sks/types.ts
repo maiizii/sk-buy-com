@@ -3,6 +3,7 @@ export type SksProbeType = "site_connectivity" | "model_list" | "model_inference
 export type SksInternalStatus =
   | "ok"
   | "slow"
+  | "reachable"
   | "timeout"
   | "auth_error"
   | "rate_limited"

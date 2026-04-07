@@ -85,12 +85,13 @@ function normalizeFailureStatus(
   errorMessage: string | null,
   modelName?: string | null
 ): SksInternalStatus {
+  if (httpStatus === 400 || httpStatus === 404) return "reachable";
   if (httpStatus === 401 || httpStatus === 403) return "auth_error";
   if (httpStatus === 408) return "timeout";
   if (httpStatus === 429) return "rate_limited";
   if (httpStatus !== null && httpStatus >= 500) return "network_error";
   if (httpStatus !== null && httpStatus >= 400) {
-    return modelName ? "model_error" : "unknown";
+    return modelName ? "model_error" : "reachable";
   }
 
   const normalized = (errorMessage || "").toLowerCase();
@@ -263,7 +264,7 @@ function saveProbeAndCredentialOutcome(input: {
 
   markSksCredentialResult(
     input.credentialId,
-    input.status === "ok" || input.status === "slow",
+    input.status === "ok" || input.status === "slow" || input.status === "reachable",
     checkedAt
   );
   cleanOldSksProbeResults();

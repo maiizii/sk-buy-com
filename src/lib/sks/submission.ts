@@ -30,7 +30,7 @@ function getApiKeyPreview(apiKey: string) {
 }
 
 function isHealthyStatus(status: SksInternalStatus | null | undefined) {
-  return status === "ok" || status === "slow";
+  return status === "ok" || status === "slow" || status === "reachable";
 }
 
 function isBasicSubmissionAccepted(input: {
