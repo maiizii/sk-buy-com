@@ -1,7 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
-import { getDetectionProxyAgent } from "@/lib/proxy-config";
+import { getDetectionProxyAgent, getSelectedDetectionProxyMaskedUrl } from "@/lib/proxy-config";
 
 export interface ProxiedHttpResponse {
   status: number;
@@ -26,6 +26,7 @@ export async function requestTextViaDetectionProxy(
   const url = new URL(inputUrl);
   const transport = resolveTransport(url);
   const agent = getDetectionProxyAgent();
+  const proxyMaskedUrl = getSelectedDetectionProxyMaskedUrl();
 
   return new Promise((resolve, reject) => {
     const request = transport.request(
@@ -53,7 +54,19 @@ export async function requestTextViaDetectionProxy(
     );
 
     request.on("error", (error) => {
-      reject(error);
+      const errorWithMeta = error as Error & { code?: string; cause?: unknown };
+      const detail = [
+        `url=${url.toString()}`,
+        `host=${url.host}`,
+        `protocol=${url.protocol}`,
+        `proxy=${proxyMaskedUrl || "direct"}`,
+        errorWithMeta.code ? `code=${errorWithMeta.code}` : null,
+        `message=${errorWithMeta.message || "Unknown request error"}`,
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      reject(new Error(detail, { cause: errorWithMeta }));
     });
 
     const timeoutMs = Math.max(1, init.timeoutMs || 10000);

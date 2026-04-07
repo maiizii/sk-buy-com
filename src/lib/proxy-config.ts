@@ -131,6 +131,11 @@ export function getDetectionProxyAgent() {
   return new SocksProxyAgent(config.selected.normalizedUrl);
 }
 
+export function getSelectedDetectionProxyMaskedUrl() {
+  const config = getDetectionProxyConfig();
+  return config.selected?.maskedUrl || null;
+}
+
 export function setDetectionProxy(rawProxyUrl: string | null | undefined) {
   const lines = splitProxyLines(rawProxyUrl);
   if (lines.length === 0) {
