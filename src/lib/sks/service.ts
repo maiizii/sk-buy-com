@@ -24,13 +24,17 @@ import {
   SKS_GRID_HOURS,
   SKS_RETENTION_DAYS,
   SKS_RETENTION_HOURS,
+  addUtcDays,
   addUtcHours,
   chooseHotModels,
+  floorToUtcDay,
   floorToUtcHour,
+  formatDayLabel,
   formatHourLabel,
   getDisplayStatusFromInternal,
   parseDbTimestamp,
   toBucketKey,
+  toDayBucketKey,
 } from "@/lib/sks/utils";
 
 function isPublicSite(site: SksSiteRecord) {
@@ -155,6 +159,48 @@ function buildGrid(probes: SksProbeResultRecord[], hours: number = SKS_GRID_HOUR
   });
 }
 
+function resolveDailyGridWindowEnd(probes: SksProbeResultRecord[]) {
+  const latestProbeTimestamp = probes.reduce((latest, probe) => {
+    const timestamp = getProbeTimestamp(probe);
+    return timestamp > latest ? timestamp : latest;
+  }, 0);
+
+  return latestProbeTimestamp > 0
+    ? floorToUtcDay(new Date(latestProbeTimestamp))
+    : floorToUtcDay(new Date());
+}
+
+function buildDailyGrid(probes: SksProbeResultRecord[], days: number = SKS_RETENTION_DAYS): SksGridCell[] {
+  const bucketMap = new Map<string, SksProbeResultRecord>();
+
+  for (const probe of probes) {
+    const parsed = parseDbTimestamp(probe.checkedAt);
+    if (!parsed) continue;
+    const bucketKey = toDayBucketKey(floorToUtcDay(parsed));
+    bucketMap.set(bucketKey, pickBucketProbe(bucketMap.get(bucketKey), probe));
+  }
+
+  const end = resolveDailyGridWindowEnd(probes);
+  const start = addUtcDays(end, -(days - 1));
+
+  return Array.from({ length: days }, (_, index) => {
+    const bucketStart = addUtcDays(start, index);
+    const key = toDayBucketKey(bucketStart);
+    const probe = bucketMap.get(key);
+    const snapshot = toStatusSnapshot(probe);
+
+    return {
+      bucketStart: bucketStart.toISOString(),
+      label: formatDayLabel(bucketStart),
+      status: snapshot.status,
+      checkedAt: snapshot.checkedAt,
+      ttfbMs: snapshot.ttfbMs,
+      totalMs: snapshot.totalMs,
+      errorMessage: snapshot.errorMessage,
+    };
+  });
+}
+
 function resolveHotModels(models: SksSiteModelRecord[]) {
   const flagged = models.filter((model) => model.isHot).map((model) => model.modelName);
   if (flagged.length > 0) return flagged;
@@ -194,6 +240,8 @@ function buildSiteCardView(site: SksSiteRecord): SksSiteCardView {
     })
   );
 
+  const stats = buildProbeStats(probes);
+
   return {
     site,
     current: toStatusSnapshot(probes[0]),
@@ -202,8 +250,10 @@ function buildSiteCardView(site: SksSiteRecord): SksSiteCardView {
       hot: resolveHotModels(models).slice(0, 10),
       all: models.map((model) => model.modelName),
     },
-    stats7d: buildProbeStats(probes),
+    stats7d: stats,
+    stats30d: stats,
     grid: buildGrid(probes),
+    dailyGrid: buildDailyGrid(probes),
   };
 }
 

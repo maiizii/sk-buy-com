@@ -16,6 +16,7 @@ import type {
   SksProbeResultRecord,
   SksSyncModelsResult,
 } from "@/lib/sks/types";
+import { requestTextViaDetectionProxy } from "@/lib/proxied-request";
 import {
   buildOpenAiUrl,
   chooseHotModels,
@@ -27,8 +28,14 @@ import {
 const SKS_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_ERROR_MESSAGE_LENGTH = 300;
 
+interface TimedFetchResponse {
+  ok: boolean;
+  status: number;
+  statusText: string;
+}
+
 interface TimedFetchResult {
-  response: Response | null;
+  response: TimedFetchResponse | null;
   ttfbMs: number | null;
   totalMs: number;
   responseText: string;
@@ -97,36 +104,40 @@ function normalizeFailureStatus(
   return "unknown";
 }
 
-async function timedFetch(url: string, init: RequestInit): Promise<TimedFetchResult> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), SKS_REQUEST_TIMEOUT_MS);
+async function timedFetch(
+  url: string,
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  }
+): Promise<TimedFetchResult> {
   const startedAt = Date.now();
 
   try {
-    const response = await fetch(url, {
+    const response = await requestTextViaDetectionProxy(url, {
       ...init,
-      cache: "no-store",
-      signal: controller.signal,
+      timeoutMs: SKS_REQUEST_TIMEOUT_MS,
     });
-    const ttfbMs = Date.now() - startedAt;
-    const responseText = await response.text();
     const totalMs = Date.now() - startedAt;
 
     return {
-      response,
-      ttfbMs,
+      response: {
+        ok: response.status >= 200 && response.status < 300,
+        status: response.status,
+        statusText: response.statusText,
+      },
+      ttfbMs: totalMs,
       totalMs,
-      responseText,
-      responseJson: safeParseJson(responseText),
+      responseText: response.text,
+      responseJson: safeParseJson(response.text),
       errorMessage: null,
       errorType: null,
     };
   } catch (error) {
     const totalMs = Date.now() - startedAt;
     const message = error instanceof Error ? error.message : String(error);
-    const isTimeout =
-      error instanceof Error &&
-      (error.name === "AbortError" || message.toLowerCase().includes("abort"));
+    const isTimeout = message.toLowerCase().includes("timeout");
 
     return {
       response: null,
@@ -137,8 +148,6 @@ async function timedFetch(url: string, init: RequestInit): Promise<TimedFetchRes
       errorMessage: truncateText(isTimeout ? `请求超时（${SKS_REQUEST_TIMEOUT_MS / 1000}s）` : message),
       errorType: isTimeout ? "timeout" : "network_error",
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

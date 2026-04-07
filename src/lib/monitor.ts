@@ -4,6 +4,7 @@ import {
   cleanOldConnectivityLogs,
   type Platform,
 } from "./db";
+import { requestTextViaDetectionProxy } from "@/lib/proxied-request";
 
 // ============================================================
 // Configuration
@@ -28,10 +29,7 @@ export async function checkPlatformHealth(
   const startTime = Date.now();
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    const response = await fetch(url, {
+    const response = await requestTextViaDetectionProxy(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -42,10 +40,8 @@ export async function checkPlatformHealth(
         messages: [{ role: "user", content: "hi" }],
         max_tokens: 1,
       }),
-      signal: controller.signal,
+      timeoutMs: REQUEST_TIMEOUT_MS,
     });
-
-    clearTimeout(timeout);
 
     const latency = Date.now() - startTime;
 
@@ -64,11 +60,7 @@ export async function checkPlatformHealth(
     const errorMessage =
       err instanceof Error ? err.message : "Unknown error";
 
-    // AbortError means timeout
-    if (
-      err instanceof Error &&
-      (err.name === "AbortError" || errorMessage.includes("abort"))
-    ) {
+    if (err instanceof Error && errorMessage.toLowerCase().includes("timeout")) {
       return { success: false, latency, error: "Request timeout (10s)" };
     }
 

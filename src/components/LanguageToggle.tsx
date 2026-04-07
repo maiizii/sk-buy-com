@@ -17,11 +17,11 @@ export function LanguageToggle() {
     <button
       type="button"
       onClick={toggleLocale}
-      className="topbar-icon-btn"
+      className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--card)] px-3 text-sm font-semibold text-[var(--foreground)] shadow-sm transition-all hover:-translate-y-0.5 hover:border-[var(--accent)]/35 hover:shadow-md"
       aria-label={t.common.switchLanguage}
       title={locale === "zh-CN" ? t.common.switchToEnglish : t.common.switchToChinese}
     >
-      <span className="text-xs font-semibold">{locale === "zh-CN" ? "EN" : "中"}</span>
+      {locale === "zh-CN" ? "EN" : "中"}
     </button>
   );
 }

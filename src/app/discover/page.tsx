@@ -1,11 +1,11 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as HoverCardPrimitives from "@radix-ui/react-hover-card";
-import { ArrowRightLeft, ChevronDown, ExternalLink, Gauge, Settings2 } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ExternalLink, Gauge, Search, SlidersHorizontal } from "lucide-react";
 import { Tracker } from "@/components/Tracker";
 import { getMessages } from "@/lib/i18n";
 import {
@@ -14,6 +14,7 @@ import {
   generateGreyTrackerData,
   getEffectiveLatencyMs,
   getStatusColor,
+  getTrackerColor,
   gridToTrackerData,
   inferProviderFamilyFromModelName,
   makeBadgeStyle,
@@ -229,9 +230,61 @@ function formatLatencyText(value: number | null) {
 
 function buildSevenDayHealthyText(rateText: string, messages: Messages) {
   if (rateText === messages.common.noData) {
-    return `${messages.home.last7Days} ${messages.common.noData}`;
+    return `30天 ${messages.common.noData}`;
   }
-  return `${messages.home.last7Days} ${rateText} ${messages.home.healthySuffix}`;
+  return `30天 ${rateText} ${messages.home.healthySuffix}`;
+}
+
+function SiteUptimeHoverCard({
+  text,
+  dailyGrid,
+  enabled,
+  messages,
+}: {
+  text: string;
+  dailyGrid: SksGridCell[];
+  enabled: boolean;
+  messages: Messages;
+}) {
+  const trackerData = enabled
+    ? dailyGrid.map((cell, index) => ({
+        key: `${cell.bucketStart}-${index}`,
+        color: getTrackerColor(cell.status),
+        tooltip: !cell.checkedAt
+          ? `${cell.label} · ${messages.common.noData}`
+          : cell.status === "failed"
+            ? `${cell.label} · ${cell.errorMessage || messages.common.connectionFailed}`
+            : `${cell.label} · ${cell.totalMs ?? cell.ttfbMs ?? 0}ms`,
+      }))
+    : [];
+
+  return (
+    <HoverCardPrimitives.Root openDelay={60} closeDelay={60}>
+      <HoverCardPrimitives.Trigger asChild>
+        <span className="cursor-pointer font-semibold text-[var(--accent-strong)] underline decoration-dotted underline-offset-4">
+          {text}
+        </span>
+      </HoverCardPrimitives.Trigger>
+      <HoverCardPrimitives.Portal>
+        <HoverCardPrimitives.Content
+          sideOffset={8}
+          side="bottom"
+          align="start"
+          avoidCollisions
+          className="z-50 w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl border border-[var(--border-color)] bg-[var(--card)]/96 p-3 shadow-xl backdrop-blur"
+        >
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-[var(--foreground)]">30天详细连接状态</div>
+            {enabled ? (
+              <Tracker data={trackerData} className="h-6" hoverEffect hoverClassName="hover:opacity-75" />
+            ) : (
+              <div className="text-xs text-[var(--muted)]">{messages.common.monitoringDisabled}</div>
+            )}
+          </div>
+        </HoverCardPrimitives.Content>
+      </HoverCardPrimitives.Portal>
+    </HoverCardPrimitives.Root>
+  );
 }
 
 function buildAverageLatencyText(latencyText: string, messages: Messages) {
@@ -566,12 +619,15 @@ function ModelTagCluster({
 
 export default function DiscoverPage() {
   const router = useRouter();
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const [sites, setSites] = useState<SiteCatalogDiscoverRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("default");
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [selectedFilters, setSelectedFilters] = useState<Record<FilterKey, string[]>>(createEmptyFilters);
   const [selectedCompareKeys, setSelectedCompareKeys] = useState<string[]>([]);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [siteDetails, setSiteDetails] = useState<Record<string, SiteDetail | null | undefined>>({});
   const [siteDetailLoading, setSiteDetailLoading] = useState<Record<string, boolean>>({});
@@ -699,7 +755,7 @@ export default function DiscoverPage() {
     return [
       {
         key: "status" as const,
-        label: t.discoverPage.filterStatus,
+        label: "平台状态",
         options: [
           { value: "ok", label: t.discoverPage.statusOk, color: getStatusColor("ok") },
           { value: "slow", label: t.discoverPage.statusSlow, color: getStatusColor("slow") },
@@ -709,7 +765,7 @@ export default function DiscoverPage() {
       },
       {
         key: "siteTag" as const,
-        label: t.discoverPage.filterSiteTag,
+        label: "平台标签",
         options: [...categoryOptions, ...recommendationOptions],
       },
       {
@@ -732,6 +788,7 @@ export default function DiscoverPage() {
   const resetFilters = () => {
     setKeyword("");
     setSortBy("default");
+    setSortMenuOpen(false);
     setSelectedFilters(createEmptyFilters());
   };
 
@@ -768,6 +825,24 @@ export default function DiscoverPage() {
       loadSiteDetail(siteKey);
     });
   }, [expandedRows, loadSiteDetail]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!sortMenuRef.current?.contains(event.target as Node)) {
+        setSortMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  const sortLabel =
+    sortBy === "uptime"
+      ? t.home.sortByUptime
+      : sortBy === "latency"
+        ? t.home.sortByLatency
+        : t.home.sortByOrder;
 
   const filteredSites = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
@@ -832,57 +907,104 @@ export default function DiscoverPage() {
 
   return (
     <div className="space-y-6">
-      <section className="shell-panel overflow-hidden bg-gradient-to-br from-[var(--card)] via-[var(--card)] to-[var(--accent-soft)]/25">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
+      <section className="shell-panel overflow-visible bg-gradient-to-br from-[var(--card)] via-[var(--card)] to-[var(--accent-soft)]/25">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl">
+          <div
+            className="group min-w-0 flex-1 cursor-pointer rounded-2xl"
+            onClick={() => setFiltersExpanded((prev) => !prev)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setFiltersExpanded((prev) => !prev);
+              }
+            }}
+          >
             <div className="inline-flex items-center rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent-strong)]">
               {t.admin.searchWorkbench}
             </div>
-            <h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{t.home.searchTitle}</h2>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--muted)] sm:text-base">
-              {t.home.searchDescription}
-            </p>
+            <div className="mt-4 flex items-center gap-3">
+              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">{t.home.searchTitle}</h2>
+              <span className="relative inline-flex">
+                <span
+                  className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-sm text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 dark:bg-gray-50 dark:text-gray-900"
+                >
+                  点击选取更多选项
+                </span>
+                <span
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--card)]/75 text-[var(--muted)]"
+                  aria-label={filtersExpanded ? t.discoverPage.collapseAction : t.discoverPage.expandAction}
+                  title={filtersExpanded ? t.discoverPage.collapseAction : t.discoverPage.expandAction}
+                >
+                  <ChevronDown className={`h-4 w-4 transition-transform ${filtersExpanded ? "rotate-180" : ""}`} />
+                </span>
+              </span>
+            </div>
           </div>
-          <Link href="/admin" className="btn-glass">
-            <Settings2 className="h-4 w-4" />
-            {t.discoverPage.configureAdmin}
-          </Link>
-        </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-[minmax(0,1.5fr)_220px]">
-          <label className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-              {t.home.keyword}
-            </span>
-            <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder={t.home.keywordPlaceholder}
-              className="admin-input"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-              {t.home.sortBy}
-            </span>
-            <select
-              value={sortBy}
-              onChange={(event) => setSortBy(event.target.value as SortOption)}
-              className="admin-input"
-            >
-              <option value="default">{t.home.sortByOrder}</option>
-              <option value="uptime">{t.home.sortByUptime}</option>
-              <option value="latency">{t.home.sortByLatency}</option>
-            </select>
-          </label>
-        </div>
+          <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <label className="relative block min-w-0 sm:w-[260px] md:w-[300px]" onClick={(event) => event.stopPropagation()} onMouseEnter={(event) => event.stopPropagation()}>
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
+                <input
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder={t.home.keywordPlaceholder}
+                  className="h-11 w-full rounded-2xl border border-[var(--border-color)] bg-[var(--background)]/78 pl-11 pr-4 text-sm text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)]/45 focus:ring-2 focus:ring-[var(--accent)]/15"
+                  style={{ boxShadow: "inset 0 2px 8px rgba(15,23,42,0.08)" }}
+                />
+              </label>
+              <div className="relative" ref={sortMenuRef} onClick={(event) => event.stopPropagation()} onMouseEnter={(event) => event.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={() => setSortMenuOpen((prev) => !prev)}
+                  className="inline-flex h-11 min-w-[168px] items-center rounded-2xl border border-[var(--border-color)] bg-[linear-gradient(180deg,var(--card),var(--background))] pl-4 pr-4 text-sm text-[var(--foreground)] outline-none transition hover:border-[var(--accent)]/30 hover:shadow-[0_8px_18px_rgba(99,102,241,0.08)] focus:border-[var(--accent)]/45 focus:ring-2 focus:ring-[var(--accent)]/15"
+                  style={{ boxShadow: "0 1px 2px rgba(15,23,42,0.04), inset 0 1px 0 rgba(255,255,255,0.08)" }}
+                  aria-haspopup="listbox"
+                  aria-expanded={sortMenuOpen}
+                >
+                  <SlidersHorizontal className="mr-2.5 h-4 w-4 text-[var(--muted)]" />
+                  <span className="flex-1 text-left">{sortLabel}</span>
+                  <ChevronDown className={`h-4 w-4 text-[var(--muted)] transition-transform ${sortMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {sortMenuOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-[80] min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--card)]/96 p-1.5 shadow-[0_18px_40px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+                    {[
+                      { value: "default", label: t.home.sortByOrder },
+                      { value: "uptime", label: t.home.sortByUptime },
+                      { value: "latency", label: t.home.sortByLatency },
+                    ].map((option) => {
+                      const active = sortBy === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => {
+                            setSortBy(option.value as SortOption);
+                            setSortMenuOpen(false);
+                          }}
+                          className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm transition ${
+                            active
+                              ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] shadow-sm"
+                              : "text-[var(--foreground)] hover:bg-[var(--accent-soft)]/55"
+                          }`}
+                        >
+                          <span>{option.label}</span>
+                          {active ? <span className="text-xs font-semibold">当前</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
 
-        {filterSections.length > 0 && (
+        {filtersExpanded && filterSections.length > 0 && (
           <div className="mt-5 rounded-2xl border border-[var(--border-color)] bg-[var(--card)]/70 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold">{t.discoverPage.advancedFilterTitle}</p>
-                <p className="mt-1 text-xs text-[var(--muted)]">{t.discoverPage.advancedFilterDescription}</p>
               </div>
               <button type="button" onClick={resetFilters} className="btn-glass">
                 {t.discoverPage.resetFilters}
@@ -954,6 +1076,7 @@ export default function DiscoverPage() {
                 {t.discoverPage.compareSelectedCountPrefix}
                 {visibleSelectedCompareKeys.length}
                 {t.discoverPage.compareSelectedCountSuffix}
+                （至少2个）
               </span>
             </div>
             <p className="mt-2 text-sm text-[var(--muted)]">{t.discoverPage.compareSelectionDescription}</p>
@@ -970,12 +1093,6 @@ export default function DiscoverPage() {
             {t.discoverPage.compareAction}
           </button>
         </div>
-        {compareDisabled && (
-          <div className="border-b border-[var(--border-color)] bg-[var(--accent-soft)]/20 px-6 py-3 text-sm text-[var(--muted)]">
-            {t.discoverPage.compareNeedAtLeastTwo}
-          </div>
-        )}
-
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] px-6 py-5">
           <div className="flex items-center gap-3">
             <Gauge className="h-4 w-4 text-[var(--accent-strong)]" />
@@ -1130,9 +1247,12 @@ export default function DiscoverPage() {
                         <div className="min-w-0 self-center justify-self-stretch">
                           <div className="ml-auto w-full max-w-[260px]">
                             <div className="mb-1 flex items-center justify-between gap-3 text-[12px]">
-                              <span className="font-semibold text-[var(--accent-strong)]">
-                                {site.hasMonitoring ? buildSevenDayHealthyText(uptimeText, t) : t.discoverPage.unmonitored}
-                              </span>
+                              <SiteUptimeHoverCard
+                                text={site.hasMonitoring ? buildSevenDayHealthyText(uptimeText, t) : t.discoverPage.unmonitored}
+                                dailyGrid={site.dailyTrackerGrid}
+                                enabled={site.hasMonitoring}
+                                messages={t}
+                              />
                               <span className="text-[var(--muted)] text-right">
                                 {site.hasMonitoring
                                   ? buildAverageLatencyText(averageLatencyText, t)

@@ -1,19 +1,28 @@
 "use client";
 
-import { Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import * as HoverCardPrimitives from "@radix-ui/react-hover-card";
 import { ArrowLeftRight, ExternalLink, Search, Sparkles } from "lucide-react";
 import { Tracker } from "@/components/Tracker";
+import { FavoriteSiteButton } from "@/components/FavoriteSiteButton";
+import { NoticeModal } from "@/components/NoticeModal";
 import { getMessages } from "@/lib/i18n";
+import {
+  FAVORITES_CHANGED_EVENT,
+  FAVORITES_FILTER_CHANGED_EVENT,
+  getFavoritesOnlyFromStorage,
+  subscribeFavoritesOnly,
+} from "@/lib/favorites-client";
 import {
   adaptSiteCatalogRecord,
   formatProviderFamily,
   generateGreyTrackerData,
   getEffectiveLatencyMs,
   getStatusColor,
+  getTrackerColor,
   gridToTrackerData,
   inferProviderFamilyFromModelName,
   makeBadgeStyle,
@@ -228,9 +237,61 @@ function formatLatencyText(value: number | null) {
 
 function buildSevenDayHealthyText(rateText: string, messages: Messages) {
   if (rateText === messages.common.noData) {
-    return `${messages.home.last7Days} ${messages.common.noData}`;
+    return `30天 ${messages.common.noData}`;
   }
-  return `${messages.home.last7Days} ${rateText} ${messages.home.healthySuffix}`;
+  return `30天 ${rateText} ${messages.home.healthySuffix}`;
+}
+
+function SiteUptimeHoverCard({
+  text,
+  dailyGrid,
+  enabled,
+  messages,
+}: {
+  text: string;
+  dailyGrid: SksGridCell[];
+  enabled: boolean;
+  messages: Messages;
+}) {
+  const trackerData = enabled
+    ? dailyGrid.map((cell, index) => ({
+        key: `${cell.bucketStart}-${index}`,
+        color: getTrackerColor(cell.status),
+        tooltip: !cell.checkedAt
+          ? `${cell.label} · ${messages.common.noData}`
+          : cell.status === "failed"
+            ? `${cell.label} · ${cell.errorMessage || messages.common.connectionFailed}`
+            : `${cell.label} · ${cell.totalMs ?? cell.ttfbMs ?? 0}ms`,
+      }))
+    : [];
+
+  return (
+    <HoverCardPrimitives.Root openDelay={60} closeDelay={60}>
+      <HoverCardPrimitives.Trigger asChild>
+        <span className="cursor-pointer font-semibold text-[var(--accent-strong)] underline decoration-dotted underline-offset-4">
+          {text}
+        </span>
+      </HoverCardPrimitives.Trigger>
+      <HoverCardPrimitives.Portal>
+        <HoverCardPrimitives.Content
+          sideOffset={8}
+          side="bottom"
+          align="start"
+          avoidCollisions
+          className="z-50 w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl border border-[var(--border-color)] bg-[var(--card)]/96 p-3 shadow-xl backdrop-blur"
+        >
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-[var(--foreground)]">30天详细连接状态</div>
+            {enabled ? (
+              <Tracker data={trackerData} className="h-6" hoverEffect hoverClassName="hover:opacity-75" />
+            ) : (
+              <div className="text-xs text-[var(--muted)]">{messages.common.monitoringDisabled}</div>
+            )}
+          </div>
+        </HoverCardPrimitives.Content>
+      </HoverCardPrimitives.Portal>
+    </HoverCardPrimitives.Root>
+  );
 }
 
 function buildAverageLatencyText(latencyText: string, messages: Messages) {
@@ -561,6 +622,9 @@ function ComparePageContent() {
   const [siteDetails, setSiteDetails] = useState<Record<string, SiteDetail | null | undefined>>({});
   const [siteDetailLoading, setSiteDetailLoading] = useState<Record<string, boolean>>({});
   const [siteDetailFetchedAt, setSiteDetailFetchedAt] = useState<Record<string, number>>({});
+  const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]);
+  const favoritesOnly = useSyncExternalStore(subscribeFavoritesOnly, getFavoritesOnlyFromStorage, () => false);
+  const [noticeMessage, setNoticeMessage] = useState("");
 
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomScrollRef = useRef<HTMLDivElement | null>(null);
@@ -596,14 +660,41 @@ function ComparePageContent() {
     };
   }, []);
 
+  useEffect(() => {
+    const loadFavorites = async () => {
+      try {
+        const response = await fetch("/api/favorites", { credentials: "include", cache: "no-store" });
+        const result = await response.json();
+        setFavoriteKeys(Array.isArray(result.data?.favorites) ? result.data.favorites : []);
+      } catch {
+        setFavoriteKeys([]);
+      }
+    };
+
+    const handleFavoritesChange = () => {
+      void loadFavorites();
+    };
+
+    void loadFavorites();
+    window.addEventListener(FAVORITES_CHANGED_EVENT, handleFavoritesChange);
+    window.addEventListener(FAVORITES_FILTER_CHANGED_EVENT, handleFavoritesChange);
+    window.addEventListener("storage", handleFavoritesChange);
+    return () => {
+      window.removeEventListener(FAVORITES_CHANGED_EVENT, handleFavoritesChange);
+      window.removeEventListener(FAVORITES_FILTER_CHANGED_EVENT, handleFavoritesChange);
+      window.removeEventListener("storage", handleFavoritesChange);
+    };
+  }, []);
+
   const selectedKeys = useMemo(() => parseSelectedKeys(searchParams.get("keys")), [searchParams]);
 
   const comparedSites = useMemo(() => {
     const orderMap = new Map(selectedKeys.map((key, index) => [key, index]));
     return sites
       .filter((site) => orderMap.has(site.siteKey))
+      .filter((site) => !favoritesOnly || favoriteKeys.includes(site.siteKey))
       .sort((a, b) => (orderMap.get(a.siteKey) ?? 0) - (orderMap.get(b.siteKey) ?? 0));
-  }, [sites, selectedKeys]);
+  }, [favoriteKeys, favoritesOnly, sites, selectedKeys]);
 
   const loadSiteDetail = useCallback(
     (siteKey: string) => {
@@ -655,7 +746,15 @@ function ComparePageContent() {
 
           return (
             <div key={site.siteKey} className="space-y-3">
-              <div className="text-base font-semibold leading-7 text-[var(--foreground)]">{site.name}</div>
+              <div className="flex items-center gap-2 text-base font-semibold leading-7 text-[var(--foreground)]">
+                <span>{site.name}</span>
+                <FavoriteSiteButton
+                  siteKey={site.siteKey}
+                  initialFavorited={favoriteKeys.includes(site.siteKey)}
+                  onNotice={setNoticeMessage}
+                  stopPropagation={false}
+                />
+              </div>
               <div className="text-xs text-[var(--muted)]">
                 <span className="mr-1 font-medium">网址：</span>
                 {externalUrl ? (
@@ -731,9 +830,12 @@ function ComparePageContent() {
           return (
             <div key={site.siteKey} className="space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="font-semibold text-[var(--accent-strong)]">
-                  {site.hasMonitoring ? buildSevenDayHealthyText(uptimeText, t) : t.discoverPage.unmonitored}
-                </span>
+                <SiteUptimeHoverCard
+                  text={site.hasMonitoring ? buildSevenDayHealthyText(uptimeText, t) : t.discoverPage.unmonitored}
+                  dailyGrid={site.dailyTrackerGrid}
+                  enabled={site.hasMonitoring}
+                  messages={t}
+                />
                 <span className="text-[var(--muted)]">
                   {site.hasMonitoring ? buildAverageLatencyText(averageLatencyText, t) : t.discoverPage.unmonitored}
                 </span>
@@ -778,7 +880,7 @@ function ComparePageContent() {
         values: comparedSites.map((site) => <div key={site.siteKey}>{renderSimpleTagList(buildOtherTags(site))}</div>),
       },
     ];
-  }, [comparedSites, loadSiteDetail, siteDetails, siteDetailLoading]);
+  }, [comparedSites, favoriteKeys, loadSiteDetail, siteDetails, siteDetailLoading]);
 
   const conclusionItems = useMemo(() => {
     if (comparedSites.length < 2) return [] as string[];
@@ -968,6 +1070,7 @@ function ComparePageContent() {
           </div>
         )}
       </section>
+      <NoticeModal open={!!noticeMessage} message={noticeMessage} onClose={() => setNoticeMessage("")} />
     </div>
   );
 }

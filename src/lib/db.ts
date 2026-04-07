@@ -390,6 +390,12 @@ db.exec(`
     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updatedAt TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS platforms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     slug TEXT UNIQUE NOT NULL,
@@ -806,6 +812,23 @@ export interface EmailVerificationChallenge {
   token: string;
   code: string;
   expiresAt: string;
+}
+
+export function getAppSetting(key: string): string | null {
+  const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setAppSetting(key: string, value: string): void {
+  db.prepare(
+    `INSERT INTO app_settings (key, value, updatedAt)
+     VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`
+  ).run(key, value);
+}
+
+export function deleteAppSetting(key: string): void {
+  db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key);
 }
 
 function generateEmailVerificationCode() {
@@ -1637,6 +1660,10 @@ function seedPlatformConfig() {
 }
 
 function seedData() {
+  if (!getAppSetting("detection.proxy.url")) {
+    setAppSetting("detection.proxy.url", "socks5://142.171.148.74:37501:rKHJBadWPn:qgSWncTfNL");
+  }
+
   const platformCount = (db.prepare(`SELECT COUNT(*) as count FROM platforms`).get() as { count: number }).count;
 
   if (platformCount === 0) {

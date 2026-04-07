@@ -36,6 +36,7 @@ export interface SiteCatalogDiscoverRecord {
   models: string[];
   hotModels: string[];
   trackerGrid: SksGridCell[];
+  dailyTrackerGrid: SksGridCell[];
   hasMonitoring: boolean;
   hasCredential: boolean;
   hasSks: boolean;
@@ -258,7 +259,8 @@ export function adaptSiteCatalogRecord(site: SiteCatalogSiteCardView): SiteCatal
   const recommendationTags = dedupeStrings(site.computed.recommendationTags);
   const currentLatencyMs = site.sks ? getLatencyValue(site.sks.current) : null;
   const trackerGrid = site.sks?.grid || [];
-  const uptimeRate = site.computed.stats7d && site.computed.stats7d.total > 0 ? site.computed.stats7d.successRate : null;
+  const dailyTrackerGrid = site.sks?.dailyGrid || [];
+  const uptimeRate = site.sks?.stats30d && site.sks.stats30d.total > 0 ? site.sks.stats30d.successRate : null;
 
   return {
     id: siteKey,
@@ -278,6 +280,7 @@ export function adaptSiteCatalogRecord(site: SiteCatalogSiteCardView): SiteCatal
     models: allModels,
     hotModels,
     trackerGrid,
+    dailyTrackerGrid,
     hasMonitoring: Boolean(site.sks),
     hasCredential: Boolean(site.catalogSite.hasCredential),
     hasSks: Boolean(site.sks),

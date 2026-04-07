@@ -1,3 +1,4 @@
+import { requestTextViaDetectionProxy } from "@/lib/proxied-request";
 import { normalizeApiBaseUrl, normalizeHostname } from "@/lib/sks/utils";
 
 const SITE_PUBLIC_TIMEOUT_MS = 12_000;
@@ -39,30 +40,24 @@ function buildPublicUrl(baseUrl: string, pathname: string) {
 }
 
 async function fetchJson(url: string): Promise<JsonFetchResult> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), SITE_PUBLIC_TIMEOUT_MS);
-
   try {
-    const response = await fetch(url, {
+    const response = await requestTextViaDetectionProxy(url, {
       method: "GET",
       headers: {
         Accept: "application/json, text/plain, */*",
       },
-      cache: "no-store",
-      signal: controller.signal,
+      timeoutMs: SITE_PUBLIC_TIMEOUT_MS,
     });
 
     return {
       status: response.status,
-      json: safeParseJson(await response.text()),
+      json: safeParseJson(response.text),
     };
   } catch {
     return {
       status: null,
       json: null,
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

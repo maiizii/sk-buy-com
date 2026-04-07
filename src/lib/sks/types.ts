@@ -154,7 +154,9 @@ export interface SksSiteCardView {
     all: string[];
   };
   stats7d: SksProbeStats;
+  stats30d: SksProbeStats;
   grid: SksGridCell[];
+  dailyGrid: SksGridCell[];
 }
 
 export interface SksSiteDetailView extends SksSiteCardView {

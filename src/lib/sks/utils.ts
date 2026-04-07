@@ -1,7 +1,7 @@
 import type { SksDisplayStatus, SksInternalStatus } from "@/lib/sks/types";
 
 export const SKS_GRID_HOURS = 24;
-export const SKS_RETENTION_DAYS = 7;
+export const SKS_RETENTION_DAYS = 30;
 export const SKS_RETENTION_HOURS = SKS_RETENTION_DAYS * 24;
 export const SKS_SLOW_THRESHOLD_MS = 1500;
 
@@ -117,10 +117,34 @@ export function floorToUtcHour(date: Date) {
   return copy;
 }
 
+export function floorToUtcDay(date: Date) {
+  const copy = new Date(date);
+  copy.setUTCHours(0, 0, 0, 0);
+  return copy;
+}
+
 export function addUtcHours(date: Date, hours: number) {
   const copy = new Date(date);
   copy.setUTCHours(copy.getUTCHours() + hours);
   return copy;
+}
+
+export function addUtcDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy;
+}
+
+export function formatDayLabel(date: Date) {
+  return date.toLocaleDateString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Shanghai",
+  });
+}
+
+export function toDayBucketKey(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
 export function inferProviderFamily(modelName: string) {

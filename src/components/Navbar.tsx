@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -17,6 +17,7 @@ import {
   Settings,
   Shield,
   Sparkles,
+  Star,
   X,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
@@ -25,6 +26,8 @@ import { AuthModal } from "./AuthModal";
 import { useMessages } from "@/lib/i18n-client";
 import { getUserDisplayName } from "@/lib/auth-schema";
 import { PixelAvatar } from "./PixelAvatar";
+import { NoticeModal } from "./NoticeModal";
+import { getFavoritesOnlyFromStorage, setFavoritesOnlyToStorage, FAVORITES_CHANGED_EVENT, subscribeFavoritesOnly } from "@/lib/favorites-client";
 
 interface UserInfo {
   id: number;
@@ -70,6 +73,14 @@ export function Navbar() {
   const [authNotice, setAuthNotice] = useState("");
   const [authError, setAuthError] = useState("");
   const [verificationEmail, setVerificationEmail] = useState("");
+  const [noticeMessage, setNoticeMessage] = useState("");
+  const [favoriteCount, setFavoriteCount] = useState(0);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const currentUser = user;
+  const favoritesOnly = useSyncExternalStore(subscribeFavoritesOnly, getFavoritesOnlyFromStorage, () => false);
+  const currentUserDisplayName = currentUser
+    ? getUserDisplayName(currentUser)
+    : "";
 
   const checkAuth = useCallback(() => {
     fetch("/api/auth/me", { credentials: "include", cache: "no-store" })
@@ -102,6 +113,33 @@ export function Navbar() {
       window.removeEventListener("storage", syncTheme);
     };
   }, []);
+
+  useEffect(() => {
+    const syncFavorites = async () => {
+      if (!currentUser) {
+        setFavoriteCount(0);
+        return;
+      }
+      try {
+        const response = await fetch("/api/favorites", { credentials: "include", cache: "no-store" });
+        const result = await response.json();
+        setFavoriteCount(Array.isArray(result.data?.favorites) ? result.data.favorites.length : 0);
+      } catch {
+        setFavoriteCount(0);
+      }
+    };
+
+    syncFavorites();
+    const handleChanged = () => {
+      void syncFavorites();
+    };
+    window.addEventListener(FAVORITES_CHANGED_EVENT, handleChanged);
+    window.addEventListener("storage", handleChanged);
+    return () => {
+      window.removeEventListener(FAVORITES_CHANGED_EVENT, handleChanged);
+      window.removeEventListener("storage", handleChanged);
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     const verificationStatus = searchParams.get("emailVerification");
@@ -186,10 +224,37 @@ export function Navbar() {
     setShowDropdown(false);
   };
 
-  const currentUser = user;
-  const currentUserDisplayName = currentUser
-    ? getUserDisplayName(currentUser)
-    : "";
+  const handleFavoritesToggle = () => {
+    if (!currentUser) {
+      setNoticeMessage(t.common.favoritesFeatureLoginRequired);
+      return;
+    }
+    const nextValue = !favoritesOnly;
+    setFavoritesOnlyToStorage(nextValue);
+  };
+
+  useEffect(() => {
+    if (!showDropdown) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!dropdownRef.current?.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showDropdown]);
 
   return (
     <>
@@ -313,6 +378,22 @@ export function Navbar() {
                   </div>
                 )}
 
+                <button
+                  type="button"
+                  onClick={handleFavoritesToggle}
+                  title={t.common.favorites}
+                  aria-label={t.common.favorites}
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--card)] text-[var(--foreground)] shadow-sm transition ${favoritesOnly ? "border-amber-400/45 text-amber-400" : "hover:bg-[var(--accent-soft)]"}`}
+                >
+                  <span className="relative inline-flex">
+                    <Star className={`h-4.5 w-4.5 ${favoritesOnly ? "fill-current" : ""}`} />
+                    {currentUser && favoriteCount > 0 ? (
+                      <span className="absolute -right-2 -top-2 inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
+                        {favoriteCount > 99 ? "99+" : favoriteCount}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
                 <LanguageToggle />
                 <ThemeToggle />
 
@@ -331,7 +412,7 @@ export function Navbar() {
                 )}
 
                 {authChecked && currentUser && (
-                  <div className="relative">
+                  <div className="relative" ref={dropdownRef}>
                     <button
                       className="nav-user-btn"
                       onClick={() => setShowDropdown((v) => !v)}
@@ -349,13 +430,7 @@ export function Navbar() {
                     </button>
 
                     {showDropdown && (
-                      <>
-                        <button
-                          className="fixed inset-0 z-40"
-                          onClick={() => setShowDropdown(false)}
-                          aria-label={t.common.closeMenu}
-                        />
-                        <div className="nav-dropdown">
+                      <div className="nav-dropdown">
                           <div className="border-b border-[var(--border-color)] px-4 py-3">
                             <p className="text-sm font-semibold">
                               {currentUserDisplayName}
@@ -382,7 +457,6 @@ export function Navbar() {
                             {t.common.logout}
                           </button>
                         </div>
-                      </>
                     )}
                   </div>
                 )}
@@ -391,6 +465,8 @@ export function Navbar() {
           </header>
         </div>
       </div>
+
+      <NoticeModal open={!!noticeMessage} message={noticeMessage} onClose={() => setNoticeMessage("")} />
 
       <AuthModal
         isOpen={showAuth}

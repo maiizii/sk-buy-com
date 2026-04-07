@@ -12,7 +12,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Tracker, type TrackerBlockProps } from "@/components/Tracker";
+import { FavoriteSiteButton } from "@/components/FavoriteSiteButton";
+import { NoticeModal } from "@/components/NoticeModal";
 import { getMessages } from "@/lib/i18n";
+import { FAVORITES_CHANGED_EVENT, FAVORITES_FILTER_CHANGED_EVENT, getFavoritesOnlyFromStorage } from "@/lib/favorites-client";
 import type {
   SiteCatalogSiteCardView,
   SiteCatalogSiteDetailView,
@@ -49,6 +52,7 @@ interface HomeSiteCard {
   averageLatencyText: string;
   trackerData: TrackerBlockProps[];
   trackerHoverEffect: boolean;
+  dailyGrid: SksGridCell[];
   visitUrl: string | null;
   reviewUrl: string | null;
 }
@@ -144,11 +148,62 @@ function formatLatencyText(value: number | null) {
   return `${Math.round(value)}ms`;
 }
 
-function buildSevenDayHealthyText(rateText: string, messages: Messages) {
+function buildThirtyDayHealthyText(rateText: string, messages: Messages) {
   if (rateText === messages.common.noData) {
-    return `${messages.home.last7Days} ${messages.common.noData}`;
+    return `30天 ${messages.common.noData}`;
   }
-  return `${messages.home.last7Days} ${rateText} ${messages.home.healthySuffix}`;
+  return `30天 ${rateText} ${messages.home.healthySuffix}`;
+}
+
+function SiteUptimeHoverCard({
+  text,
+  dailyGrid,
+  enabled,
+  messages,
+}: {
+  text: string;
+  dailyGrid: SksGridCell[];
+  enabled: boolean;
+  messages: Messages;
+}) {
+  const trackerData = enabled
+    ? dailyGrid.map((cell, index) => ({
+        key: `${cell.bucketStart}-${index}`,
+        color: getTrackerColor(cell.status),
+        tooltip: !cell.checkedAt
+          ? `${cell.label} · ${messages.common.noData}`
+          : cell.status === "failed"
+            ? `${cell.label} · ${cell.errorMessage || messages.common.connectionFailed}`
+            : `${cell.label} · ${cell.totalMs ?? cell.ttfbMs ?? 0}ms`,
+      }))
+    : [];
+
+  return (
+    <HoverCardPrimitives.Root openDelay={60} closeDelay={60}>
+      <HoverCardPrimitives.Trigger asChild>
+        <span className="cursor-pointer font-semibold text-[var(--accent-strong)] underline decoration-dotted underline-offset-4">
+          {text}
+        </span>
+      </HoverCardPrimitives.Trigger>
+      <HoverCardPrimitives.Portal>
+        <HoverCardPrimitives.Content
+          sideOffset={8}
+          side="bottom"
+          align="start"
+          className="z-50 w-[320px] rounded-2xl border border-[var(--border-color)] bg-[var(--card)]/96 p-3 shadow-2xl backdrop-blur"
+        >
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-[var(--foreground)]">30天详细连接状态</div>
+            {enabled ? (
+              <Tracker data={trackerData} className="h-6" hoverEffect hoverClassName="hover:opacity-75" />
+            ) : (
+              <div className="text-xs text-[var(--muted)]">{messages.common.monitoringDisabled}</div>
+            )}
+          </div>
+        </HoverCardPrimitives.Content>
+      </HoverCardPrimitives.Portal>
+    </HoverCardPrimitives.Root>
+  );
 }
 
 function buildAverageLatencyText(latencyText: string, messages: Messages) {
@@ -357,7 +412,7 @@ function ProviderIcon({ tag }: { tag: HomeSiteTag }) {
     <InlineHoverTooltip content={tag.label}>
       <span
         aria-label={tag.label}
-        className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full shadow-sm"
+        className="inline-flex h-7.5 w-7.5 shrink-0 cursor-pointer items-center justify-center rounded-full shadow-sm"
         style={{ backgroundColor: `${safeColor}12` }}
       >
         {tag.iconUrl ? (
@@ -365,7 +420,7 @@ function ProviderIcon({ tag }: { tag: HomeSiteTag }) {
             <img
               src={tag.iconUrl}
               alt={tag.label}
-              className={`h-5 w-5 object-contain ${tag.darkIconUrl ? "dark:hidden" : ""}`}
+              className={`h-4.5 w-4.5 object-contain ${tag.darkIconUrl ? "dark:hidden" : ""}`}
               loading="lazy"
               decoding="async"
               referrerPolicy="no-referrer"
@@ -374,7 +429,7 @@ function ProviderIcon({ tag }: { tag: HomeSiteTag }) {
               <img
                 src={tag.darkIconUrl}
                 alt={tag.label}
-                className="hidden h-5 w-5 object-contain dark:block"
+                className="hidden h-4.5 w-4.5 object-contain dark:block"
                 loading="lazy"
                 decoding="async"
                 referrerPolicy="no-referrer"
@@ -456,7 +511,7 @@ function ModelStatusHoverCard({
               <div className="flex items-start justify-between gap-3 text-xs">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="font-semibold text-[var(--accent-strong)]">
-                    {buildSevenDayHealthyText(uptimeText, messages)}
+                    {`${messages.home.last7Days} ${uptimeText === messages.common.noData ? messages.common.noData : `${uptimeText} ${messages.home.healthySuffix}`}`}
                   </span>
                   <span className="text-[var(--muted)]">
                     {buildAverageLatencyText(averageLatencyText, messages)}
@@ -623,8 +678,8 @@ function adaptSiteCard(site: SiteCatalogSiteCardView, messages: Messages): HomeS
   const supportedModels = buildSupportedModels(site);
   const description = buildSiteDescription(site);
   const displayUrl = site.catalogSite.homepageUrl || site.catalogSite.apiBaseUrl || site.catalogSite.hostname;
-  const uptimeText = site.computed.stats7d
-    ? `${site.computed.stats7d.successRate.toFixed(1)}%`
+  const uptimeText = site.sks?.stats30d
+    ? `${site.sks.stats30d.successRate.toFixed(1)}%`
     : messages.common.noData;
   const averageLatencyText = formatLatencyText(
     site.sks ? computeAverageLatency(site.sks.grid, 24) ?? getLatencyValue(site.sks.current) : null
@@ -667,6 +722,7 @@ function adaptSiteCard(site: SiteCatalogSiteCardView, messages: Messages): HomeS
       ? gridToTrackerData(site.sks.grid, messages.common.noData, messages.common.connectionFailed, 24)
       : generateGreyTrackerData(messages.common.monitoringDisabled, 24),
     trackerHoverEffect: Boolean(site.sks),
+    dailyGrid: site.sks?.dailyGrid || [],
     visitUrl: normalizeExternalUrl(site.catalogSite.homepageUrl || site.catalogSite.apiBaseUrl),
     reviewUrl: `/review/site/${encodeURIComponent(site.catalogSite.normalizedHostname || site.catalogSite.hostname)}`,
   };
@@ -681,6 +737,9 @@ export default function Home() {
   const [siteDetails, setSiteDetails] = useState<Record<string, HomeSiteDetail | null | undefined>>({});
   const [siteDetailLoading, setSiteDetailLoading] = useState<Record<string, boolean>>({});
   const [siteDetailFetchedAt, setSiteDetailFetchedAt] = useState<Record<string, number>>({});
+  const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState("");
 
   const fetchSites = useCallback(async () => {
     const response = await fetch("/api/sites", { cache: "no-store" });
@@ -752,6 +811,35 @@ export default function Home() {
       });
   };
 
+  const loadFavorites = useCallback(async () => {
+    try {
+      const response = await fetch("/api/favorites", { credentials: "include", cache: "no-store" });
+      const result = await response.json();
+      setFavoriteKeys(Array.isArray(result.data?.favorites) ? result.data.favorites : []);
+    } catch {
+      setFavoriteKeys([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    setFavoritesOnly(getFavoritesOnlyFromStorage());
+    void loadFavorites();
+
+    const handleFavoritesChange = () => {
+      setFavoritesOnly(getFavoritesOnlyFromStorage());
+      void loadFavorites();
+    };
+
+    window.addEventListener(FAVORITES_CHANGED_EVENT, handleFavoritesChange);
+    window.addEventListener(FAVORITES_FILTER_CHANGED_EVENT, handleFavoritesChange);
+    window.addEventListener("storage", handleFavoritesChange);
+    return () => {
+      window.removeEventListener(FAVORITES_CHANGED_EVENT, handleFavoritesChange);
+      window.removeEventListener(FAVORITES_FILTER_CHANGED_EVENT, handleFavoritesChange);
+      window.removeEventListener("storage", handleFavoritesChange);
+    };
+  }, [loadFavorites]);
+
   const homeCards = useMemo(() => sites.map((site) => adaptSiteCard(site, t)), [sites, t]);
 
   useEffect(() => {
@@ -767,49 +855,12 @@ export default function Home() {
   const filteredPlatforms = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     return homeCards
-      .filter((site) => !normalizedKeyword || site.searchText.includes(normalizedKeyword))
+      .filter((site) => (!favoritesOnly || favoriteKeys.includes(site.siteKey)) && (!normalizedKeyword || site.searchText.includes(normalizedKeyword)))
       .slice(0, 8);
-  }, [homeCards, keyword]);
+  }, [favoriteKeys, favoritesOnly, homeCards, keyword]);
 
   return (
     <div className="space-y-6">
-      <section className="shell-panel overflow-hidden bg-gradient-to-br from-[var(--card)] via-[var(--card)] to-[var(--accent-soft)]/30">
-        <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr] xl:items-center">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent-strong)]">
-              <Search className="h-3.5 w-3.5" />
-              {t.home.compactSearchTitle}
-            </div>
-            <h2 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{t.home.searchTitle}</h2>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--muted)] sm:text-base">{t.home.compactSearchDescription}</p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="/discover" className="btn-glass btn-glass-primary">
-                {t.home.openDiscover}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link href="/admin" className="btn-glass">
-                {t.home.viewAdminPlanning}
-              </Link>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card)]/80 p-4">
-            <label className="space-y-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">{t.home.keyword}</span>
-              <input
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                placeholder={t.home.keywordPlaceholder}
-                className="admin-input"
-              />
-            </label>
-            <p className="mt-3 text-xs leading-6 text-[var(--muted)]">
-              {t.home.quickHint}
-            </p>
-          </div>
-        </div>
-      </section>
-
       <section className="admin-card overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] px-6 py-5">
           <div>
@@ -819,10 +870,22 @@ export default function Home() {
             </div>
             <p className="mt-1 text-sm text-[var(--muted)]">{t.home.featuredDescription}</p>
           </div>
-          <Link href="/discover" className="btn-glass">
-            {t.home.enterDiscover}
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+          <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+            <label className="relative block min-w-0 sm:w-[320px] md:w-[360px]">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
+              <input
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder={t.home.keywordPlaceholder}
+                className="h-11 w-full rounded-2xl border border-[var(--border-color)] bg-[var(--background)]/78 pl-11 pr-4 text-sm text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)]/45 focus:ring-2 focus:ring-[var(--accent)]/15"
+                style={{ boxShadow: "inset 0 2px 8px rgba(15,23,42,0.08)" }}
+              />
+            </label>
+            <Link href="/discover" className="btn-glass shrink-0">
+              {t.home.enterDiscover}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
 
         <div className="grid items-start gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
@@ -856,9 +919,16 @@ export default function Home() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <InlineHoverTooltip content={site.visitUrl || site.displayUrl} align="start">
-                          <h4 className="max-w-full cursor-pointer truncate text-base font-semibold">
-                            {site.name}
-                          </h4>
+                          <div className="flex max-w-full items-center gap-2">
+                            <h4 className="max-w-full cursor-pointer truncate text-base font-semibold">
+                              {site.name}
+                            </h4>
+                            <FavoriteSiteButton
+                              siteKey={site.siteKey}
+                              initialFavorited={favoriteKeys.includes(site.siteKey)}
+                              onNotice={setNoticeMessage}
+                            />
+                          </div>
                         </InlineHoverTooltip>
                         <span
                           className="inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-xs font-medium"
@@ -888,7 +958,11 @@ export default function Home() {
                     }`}
                   >
                     {site.supplierTags.length > 0 ? (
-                      <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
+                      <div
+                        className={`min-w-0 flex flex-1 items-center gap-1.5 py-0.5 ${
+                          expanded ? "flex-wrap" : "overflow-hidden whitespace-nowrap"
+                        }`}
+                      >
                         {site.supplierTags.map((tag) => (
                           <ProviderIcon key={tag.key} tag={tag} />
                         ))}
@@ -924,9 +998,12 @@ export default function Home() {
                   <div className="mt-auto flex flex-wrap items-end gap-3 pt-4">
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span className="font-semibold text-[var(--accent-strong)]">
-                          {buildSevenDayHealthyText(site.uptimeText, t)}
-                        </span>
+                        <SiteUptimeHoverCard
+                          text={buildThirtyDayHealthyText(site.uptimeText, t)}
+                          dailyGrid={site.dailyGrid}
+                          enabled={site.trackerHoverEffect}
+                          messages={t}
+                        />
                         <span className="text-[var(--muted)]">
                           {buildAverageLatencyText(site.averageLatencyText, t)}
                         </span>
@@ -960,6 +1037,7 @@ export default function Home() {
           )}
         </div>
       </section>
+      <NoticeModal open={!!noticeMessage} message={noticeMessage} onClose={() => setNoticeMessage("")} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { SksUserSubmissionView } from "@/lib/sks/types";
 import { formatCheckedAt, formatLatency, getStatusLabel, SksStatusPill } from "@/components/sks/SksUi";
+import { emitFavoritesChanged } from "@/lib/favorites-client";
 
 function statusToPillStatus(item: SksUserSubmissionView) {
   return item.submission.status === "approved"
@@ -253,6 +254,27 @@ export function SksSubmitClient({
       setEditingSubmissionId(null);
       setApiBaseUrl("");
       setApiKey("");
+
+      if (payload.data.submission.status === "approved") {
+        const favoriteSiteKey = payload.data.publicView?.site.normalizedHostname || payload.data.site?.normalizedHostname;
+        if (favoriteSiteKey) {
+          try {
+            const favoriteResponse = await fetch("/api/favorites", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ siteKey: favoriteSiteKey, action: "add" }),
+            });
+            const favoritePayload = (await favoriteResponse.json().catch(() => null)) as { success?: boolean } | null;
+            if (favoriteResponse.ok && favoritePayload?.success) {
+              emitFavoritesChanged();
+            }
+          } catch {
+            // 忽略自动收藏失败，不影响提交流程
+          }
+        }
+      }
+
       setMessage(payload.data.submission.lastMessage || (editingSubmissionId ? "重新提交成功" : "提交成功"));
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "提交失败");
