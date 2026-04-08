@@ -19,7 +19,13 @@ export type SksOwnershipStatus = "unclaimed" | "observed" | "probable_owner" | "
 
 export type SksSubmissionStatus = "pending" | "approved" | "failed";
 
-export type SksCallTemplateKey = "badge" | "mini-grid" | "full-card" | "json-feed";
+export type SksCallTemplateKey =
+  | "badge"
+  | "mini-grid"
+  | "full-card"
+  | "site-card-compact"
+  | "site-card-large"
+  | "json-feed";
 
 export interface SksSiteRecord {
   id: string;
@@ -101,7 +107,13 @@ export interface SksWidgetRecord {
   siteId: string;
   createdByUserId: number | null;
   widgetToken: string;
-  widgetType: "badge" | "mini-grid" | "full-card" | "json-feed";
+  widgetType:
+    | "badge"
+    | "mini-grid"
+    | "full-card"
+    | "site-card-compact"
+    | "site-card-large"
+    | "json-feed";
   theme: string;
   stylePreset: string;
   allowedHostname: string | null;
@@ -249,6 +261,7 @@ export interface SksCallOptionView {
   template: SksCallTemplateKey;
   label: string;
   description: string;
+  fingerprint: string;
   statusPageUrl: string;
   previewUrl: string;
   jsonUrl: string;

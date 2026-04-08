@@ -13,6 +13,7 @@ import {
   upsertSksSite,
 } from "@/lib/sks/db";
 import { getSksSiteByKey } from "@/lib/sks/service";
+import { buildSksEmbedFingerprint } from "@/lib/sks/fingerprint";
 import type {
   SksCallOptionView,
   SksFullProbeResult,
@@ -68,13 +69,14 @@ function resolveFailureMessage(input: {
   return "检测未通过，暂未收录";
 }
 
-function buildIframeScript(iframeUrl: string, height: number) {
+function buildIframeScript(iframeUrl: string, height: number, length: number) {
   return [
     "const container = document.querySelector('#sks-widget');",
     "const iframe = document.createElement('iframe');",
     `iframe.src = ${JSON.stringify(iframeUrl)};`,
     "iframe.loading = 'lazy';",
-    "iframe.style.width = '100%';",
+    `iframe.style.width = '${length}px';`,
+    "iframe.style.maxWidth = '100%';",
     `iframe.style.height = '${height}px';`,
     "iframe.style.border = '0';",
     "iframe.style.borderRadius = '16px';",
@@ -94,51 +96,54 @@ function buildJsonSnippet(jsonUrl: string) {
 }
 
 export function buildSksCallOptions(siteKey: string): SksCallOptionView[] {
+  return buildSksCallOptionsForUser(siteKey, 0);
+}
+
+export function buildSksCallOptionsForUser(siteKey: string, userId: number): SksCallOptionView[] {
   const encodedSiteKey = encodeURIComponent(siteKey);
+  const fingerprint = buildSksEmbedFingerprint({ userId, siteKey });
   const statusPageUrl = `/sks/site/${encodedSiteKey}`;
-  const jsonUrl = `/api/sks/site/${encodedSiteKey}`;
+  const jsonUrl = `/api/sks/site/${encodedSiteKey}?fp=${encodeURIComponent(fingerprint)}`;
   const widgetBaseUrl = `/api/sks/widget/${encodedSiteKey}`;
 
   const widgetOptions: Array<{
     template: Exclude<SksCallOptionView["template"], "json-feed">;
     label: string;
     description: string;
+    length: number;
     height: number;
   }> = [
     {
-      template: "badge",
-      label: "Badge 横幅",
-      description: "适合页头、侧栏或个人导航页，突出当前状态与延迟。",
-      height: 84,
+      template: "site-card-large",
+      label: "首页卡片同款模板",
+      description: "与首页 Featured 卡片同款交互与展示效果，用于嵌入展示你提交的网站状态。",
+      length: 680,
+      height: 272,
     },
     {
-      template: "mini-grid",
-      label: "Mini Grid 小方格",
-      description: "适合展示最近 24 小时连续状态，信息密度更高。",
-      height: 164,
-    },
-    {
-      template: "full-card",
-      label: "Full Card 完整卡片",
-      description: "适合独立页面或文档页，包含状态、成功率与热门模型。",
-      height: 256,
+      template: "site-card-compact",
+      label: "发现页长条模板",
+      description: "横向长条样式，适合列表、侧栏或信息流位置展示。",
+      length: 980,
+      height: 220,
     },
   ];
 
   const widgets = widgetOptions.map((item) => {
-    const iframeUrl = `${widgetBaseUrl}?template=${item.template}`;
+    const iframeUrl = `${widgetBaseUrl}?template=${item.template}&length=${item.length}&fp=${encodeURIComponent(fingerprint)}`;
 
     return {
       template: item.template,
       label: item.label,
       description: item.description,
+      fingerprint,
       statusPageUrl,
       previewUrl: iframeUrl,
       jsonUrl,
       iframeUrl,
       scriptUrl: null,
-      iframeSnippet: `<iframe src="${iframeUrl}" loading="lazy" style="width:100%;height:${item.height}px;border:0;border-radius:16px;overflow:hidden;"></iframe>`,
-      scriptSnippet: buildIframeScript(iframeUrl, item.height),
+      iframeSnippet: `<iframe src="${iframeUrl}" loading="lazy" style="width:${item.length}px;max-width:100%;height:${item.height}px;border:0;border-radius:16px;overflow:hidden;"></iframe>`,
+      scriptSnippet: buildIframeScript(iframeUrl, item.height, item.length),
       jsonSnippet: buildJsonSnippet(jsonUrl),
     } satisfies SksCallOptionView;
   });
@@ -149,6 +154,7 @@ export function buildSksCallOptions(siteKey: string): SksCallOptionView[] {
       template: "json-feed",
       label: "JSON Feed 数据接口",
       description: "适合脚本调用、自动化同步或你自己的前端组件二次渲染。",
+      fingerprint,
       statusPageUrl,
       previewUrl: jsonUrl,
       jsonUrl,
@@ -211,7 +217,7 @@ function buildSubmissionView(submission: SksUserSubmissionRecord): SksUserSubmis
     site,
     publicView,
     callOptions: publicView
-      ? buildSksCallOptions(publicView.site.normalizedHostname || publicView.site.id)
+      ? buildSksCallOptionsForUser(publicView.site.normalizedHostname || publicView.site.id, reconciledSubmission.userId)
       : [],
   };
 }

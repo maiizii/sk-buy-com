@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { SksUserSubmissionView } from "@/lib/sks/types";
+import type { SksCallTemplateKey, SksUserSubmissionView } from "@/lib/sks/types";
 import { formatCheckedAt, formatLatency, getStatusLabel, SksStatusPill } from "@/components/sks/SksUi";
 import { emitFavoritesChanged } from "@/lib/favorites-client";
 
@@ -16,6 +16,258 @@ function statusToPillStatus(item: SksUserSubmissionView) {
 
 function canRepairApprovedSubmission(item: SksUserSubmissionView) {
   return item.submission.status === "approved" && !item.site;
+}
+
+type VisualTemplate = Extract<SksCallTemplateKey, "site-card-large" | "site-card-compact" | "full-card">;
+
+const VISUAL_TEMPLATE_META: Record<
+  VisualTemplate,
+  {
+    label: string;
+    description: string;
+    defaultLength: number;
+    iframeHeight: number;
+    samePagePreview: boolean;
+  }
+> = {
+  "site-card-large": {
+    label: "卡片",
+    description: "首页卡片样式，信息完整，适合内容区嵌入。",
+    defaultLength: 380,
+    iframeHeight: 272,
+    samePagePreview: true,
+  },
+  "site-card-compact": {
+    label: "条幅",
+    description: "横向长条样式，适合侧栏或列表区域。",
+    defaultLength: 980,
+    iframeHeight: 220,
+    samePagePreview: true,
+  },
+  "full-card": {
+    label: "大屏",
+    description: "大屏展示模式，建议新页面单独预览。",
+    defaultLength: 1280,
+    iframeHeight: 620,
+    samePagePreview: false,
+  },
+};
+
+function buildWidgetPreviewUrl(siteKey: string, template: VisualTemplate, length: number) {
+  const encodedSiteKey = encodeURIComponent(siteKey);
+  const base = `/api/sks/widget/${encodedSiteKey}?template=${template}`;
+  if (template === "site-card-large" || template === "site-card-compact") {
+    return `${base}&length=${Math.max(120, Math.min(2000, Math.trunc(length || 0)))}`;
+  }
+  return base;
+}
+
+function buildIframeScriptSnippet(iframeUrl: string, height: number, length: number) {
+  return [
+    "const container = document.querySelector('#sks-widget');",
+    "const iframe = document.createElement('iframe');",
+    `iframe.src = ${JSON.stringify(iframeUrl)};`,
+    "iframe.loading = 'lazy';",
+    `iframe.style.width = '${length}px';`,
+    "iframe.style.maxWidth = '100%';",
+    `iframe.style.height = '${height}px';`,
+    "iframe.style.border = '0';",
+    "iframe.style.borderRadius = '16px';",
+    "iframe.style.overflow = 'hidden';",
+    "container?.appendChild(iframe);",
+  ].join("\n");
+}
+
+function buildJsonSnippet(jsonUrl: string) {
+  return [
+    `fetch(${JSON.stringify(jsonUrl)}, { cache: "no-store" })`,
+    "  .then((response) => response.json())",
+    "  .then((payload) => {",
+    "    console.log('SKS payload:', payload);",
+    "  });",
+  ].join("\n");
+}
+
+function VisualCallEditor({ item }: { item: SksUserSubmissionView }) {
+  if (!item.publicView) return null;
+
+  const siteKey = item.publicView.site.normalizedHostname || item.publicView.site.id;
+  const encodedSiteKey = encodeURIComponent(siteKey);
+  const [template, setTemplate] = useState<VisualTemplate>("site-card-large");
+  const [lengthInput, setLengthInput] = useState<string>(String(VISUAL_TEMPLATE_META["site-card-large"].defaultLength));
+  const [showCode, setShowCode] = useState(false);
+  const [origin, setOrigin] = useState("");
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [previewHeight, setPreviewHeight] = useState<number>(VISUAL_TEMPLATE_META["site-card-large"].iframeHeight);
+
+  const templateMeta = VISUAL_TEMPLATE_META[template];
+  const parsedLength = Number.parseInt(lengthInput, 10);
+  const effectiveLength = Number.isFinite(parsedLength)
+    ? Math.max(120, Math.min(2000, Math.trunc(parsedLength)))
+    : templateMeta.defaultLength;
+  const fingerprint = item.callOptions[0]?.fingerprint || "";
+  const relativeJsonUrl = `/api/sks/site/${encodedSiteKey}?fp=${encodeURIComponent(fingerprint)}`;
+  const relativePreviewUrl = `${buildWidgetPreviewUrl(siteKey, template, effectiveLength)}&fp=${encodeURIComponent(fingerprint)}`;
+  const jsonUrl = origin ? `${origin}${relativeJsonUrl}` : relativeJsonUrl;
+  const previewUrl = origin ? `${origin}${relativePreviewUrl}` : relativePreviewUrl;
+  const iframeSnippet =
+    template === "full-card"
+      ? null
+      : `<iframe src="${previewUrl}" loading="lazy" style="width:${effectiveLength}px;max-width:100%;height:${templateMeta.iframeHeight}px;border:0;border-radius:16px;overflow:hidden;"></iframe>`;
+  const scriptSnippet =
+    template === "full-card"
+      ? null
+      : buildIframeScriptSnippet(previewUrl, templateMeta.iframeHeight, effectiveLength);
+  const jsonSnippet = useMemo(() => buildJsonSnippet(jsonUrl), [jsonUrl]);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    setPreviewHeight(templateMeta.iframeHeight);
+  }, [template, templateMeta.iframeHeight, previewUrl]);
+
+  useEffect(() => {
+    if (!templateMeta.samePagePreview) return;
+    let stopped = false;
+    const maxPreviewHeight = template === "site-card-large" ? 560 : 520;
+    const tick = () => {
+      if (stopped) return;
+      const frame = iframeRef.current;
+      const doc = frame?.contentWindow?.document;
+      if (doc) {
+        const nextHeight = Math.max(
+          templateMeta.iframeHeight,
+          doc.documentElement?.scrollHeight || 0,
+          doc.body?.scrollHeight || 0
+        );
+        const safeNextHeight = Math.min(maxPreviewHeight, nextHeight);
+        setPreviewHeight((current) => (Math.abs(current - safeNextHeight) > 1 ? safeNextHeight : current));
+      }
+    };
+    const timer = window.setInterval(tick, 180);
+    tick();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [template, templateMeta.samePagePreview, templateMeta.iframeHeight, previewUrl]);
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-[var(--border-color)] bg-[var(--card-hover)] p-4">
+      <div>
+        <h4 className="text-base font-semibold text-[var(--foreground)]">可视化调用编辑区</h4>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2">
+        {(Object.keys(VISUAL_TEMPLATE_META) as VisualTemplate[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              setTemplate(key);
+              setLengthInput(String(VISUAL_TEMPLATE_META[key].defaultLength));
+              setPreviewHeight(VISUAL_TEMPLATE_META[key].iframeHeight);
+              setShowCode(false);
+            }}
+            className={`cursor-pointer rounded-full border px-3 py-2 text-sm font-semibold transition ${
+              template === key
+                ? "border-violet-500/40 bg-violet-500/10 text-[var(--foreground)]"
+                : "border-[var(--border-color)] bg-[var(--card)] text-[var(--muted)] hover:border-violet-500/30 hover:text-[var(--foreground)]"
+            }`}
+          >
+            {VISUAL_TEMPLATE_META[key].label}
+          </button>
+        ))}
+
+        <span className="mx-1 hidden h-7 w-px bg-[var(--border-color)] sm:block" />
+
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-[var(--muted)]">宽度</span>
+          <input
+            type="number"
+            min={120}
+            max={2000}
+            value={lengthInput}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              if (!nextValue) {
+                setLengthInput("");
+                return;
+              }
+              if (/^\d+$/.test(nextValue)) {
+                setLengthInput(nextValue);
+              }
+            }}
+            className="w-[132px] rounded-full border border-[var(--border-color)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)]"
+            disabled={!templateMeta.samePagePreview}
+            placeholder="宽度"
+          />
+        </div>
+
+        <button type="button" className="btn-glass" onClick={() => setShowCode((value) => !value)}>
+          {showCode ? "实时预览" : "调用代码"}
+        </button>
+        <a href={previewUrl} target="_blank" rel="noreferrer" className="btn-glass">
+          原始预览
+        </a>
+        <a href={jsonUrl} target="_blank" rel="noreferrer" className="btn-glass">
+          JSON
+        </a>
+      </div>
+
+      {showCode ? (
+        <div className="space-y-3">
+          {iframeSnippet ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">iframe</p>
+              <textarea
+                readOnly
+                value={iframeSnippet}
+                className="min-h-[90px] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-3 text-xs text-[var(--foreground)]"
+              />
+            </div>
+          ) : null}
+
+          {scriptSnippet ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">script</p>
+              <textarea
+                readOnly
+                value={scriptSnippet}
+                className="min-h-[120px] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-3 text-xs text-[var(--foreground)]"
+              />
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">json</p>
+            <textarea
+              readOnly
+              value={jsonSnippet}
+              className="min-h-[100px] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-3 text-xs text-[var(--foreground)]"
+            />
+          </div>
+        </div>
+      ) : templateMeta.samePagePreview ? (
+        <div className="overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-3">
+          <iframe
+            key={`${template}-${effectiveLength}`}
+            ref={iframeRef}
+            title={`sks-widget-${siteKey}-${template}`}
+            src={previewUrl}
+            className="w-full"
+            style={{ height: previewHeight, border: 0, borderRadius: 12 }}
+          />
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--card)] px-4 py-6 text-sm text-[var(--muted)]">
+          即将上线
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SubmissionCard({
@@ -36,35 +288,37 @@ function SubmissionCard({
   const approved = item.submission.status === "approved";
   const failed = item.submission.status === "failed";
   const repairableApproved = canRepairApprovedSubmission(item);
+  const siteName = item.site?.displayName || item.submission.displayName || item.submission.hostname;
 
   return (
-    <article className="rounded-3xl border border-[var(--border-color)] bg-[var(--card)] p-5 shadow-sm">
+    <article
+      onClick={onToggle}
+      className="cursor-pointer rounded-3xl border border-[var(--border-color)] bg-[var(--card)] p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-violet-500/30 hover:bg-[var(--card-hover)] hover:shadow-md"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <button type="button" onClick={onToggle} className="flex-1 text-left">
+        <div className="flex-1 text-left">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-lg font-semibold text-[var(--foreground)]">
-                {item.site?.displayName || item.submission.displayName || item.submission.hostname}
-              </h3>
+              <h3 className="text-lg font-semibold text-[var(--foreground)]">{siteName}</h3>
               <SksStatusPill status={statusToPillStatus(item)} />
-              <span className="text-xs text-[var(--muted)]">{expanded ? "收起" : "展开"}</span>
+              <span
+                className={`inline-flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--card)] text-[var(--muted)] transition ${
+                  expanded ? "rotate-180" : ""
+                }`}
+              >
+                <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" aria-hidden>
+                  <path d="M5 8l5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
             </div>
             <p className="break-all text-sm text-[var(--muted)]">{item.submission.apiBaseUrl}</p>
             <p className="text-xs text-[var(--muted)]">
               API SKY：{item.submission.apiKeyPreview} · 提交时间：{formatCheckedAt(item.submission.createdAt)}
             </p>
           </div>
-        </button>
+        </div>
 
-        <div className="flex flex-wrap gap-2">
-          {approved && item.publicView ? (
-            <Link
-              href={`/sks/site/${encodeURIComponent(item.publicView.site.normalizedHostname || item.publicView.site.id)}`}
-              className="btn-glass"
-            >
-              查看状态页
-            </Link>
-          ) : null}
+        <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
           {item.site?.homepageUrl ? (
             <a href={item.site.homepageUrl} target="_blank" rel="noreferrer" className="btn-glass">
               访问站点
@@ -89,115 +343,7 @@ function SubmissionCard({
       </div>
 
       {expanded ? (
-        <div className="mt-4 space-y-5">
-          <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--accent-soft)]/30 p-4 text-sm">
-            <p className="font-medium text-[var(--foreground)]">处理结果</p>
-            <p className="mt-2 text-[var(--muted)]">
-              {item.submission.lastMessage ||
-                (item.submission.status === "pending"
-                  ? "已记录，等待系统检测。"
-                  : repairableApproved
-                    ? "该网站此前检测通过，但当前 SKS 站点记录已不存在，可重新提交以恢复收录。"
-                    : item.submission.status === "approved"
-                      ? "检测通过，已收录成功。"
-                      : "检测失败。")}
-            </p>
-            {approved && item.publicView ? (
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">当前状态</p>
-                  <p className="mt-1 font-semibold text-[var(--foreground)]">
-                    {getStatusLabel(item.publicView.current.status)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">最近延迟</p>
-                  <p className="mt-1 font-semibold text-[var(--foreground)]">
-                    {formatLatency(item.publicView.current.totalMs)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">7 天可用率</p>
-                  <p className="mt-1 font-semibold text-[var(--foreground)]">
-                    {item.publicView.stats7d.successRate.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          {item.callOptions.length > 0 ? (
-            <div className="space-y-3">
-              <div>
-                <h4 className="text-base font-semibold text-[var(--foreground)]">调用方式</h4>
-                <p className="mt-1 text-sm text-[var(--muted)]">
-                  你可以直接复制 iframe / JS / JSON 方式，把自己提交成功的网站接入到任意页面。
-                </p>
-              </div>
-              <div className="grid gap-4 xl:grid-cols-2">
-                {item.callOptions.map((option) => (
-                  <section
-                    key={option.template}
-                    className="rounded-2xl border border-[var(--border-color)] bg-[var(--card-hover)] p-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="font-medium text-[var(--foreground)]">{option.label}</p>
-                        <p className="mt-1 text-xs text-[var(--muted)]">{option.description}</p>
-                      </div>
-                      <span className="rounded-full border border-[var(--border-color)] px-2 py-1 text-[11px] text-[var(--muted)]">
-                        {option.template}
-                      </span>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                      <a href={option.previewUrl} target="_blank" rel="noreferrer" className="btn-glass">
-                        预览
-                      </a>
-                      <a href={option.jsonUrl} target="_blank" rel="noreferrer" className="btn-glass">
-                        JSON
-                      </a>
-                      <Link href={option.statusPageUrl} className="btn-glass">
-                        状态页
-                      </Link>
-                    </div>
-
-                    {option.iframeSnippet ? (
-                      <div className="mt-3 space-y-2">
-                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">iframe</p>
-                        <textarea
-                          readOnly
-                          value={option.iframeSnippet}
-                          className="min-h-[90px] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-3 text-xs text-[var(--foreground)]"
-                        />
-                      </div>
-                    ) : null}
-
-                    {option.scriptSnippet ? (
-                      <div className="mt-3 space-y-2">
-                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">script</p>
-                        <textarea
-                          readOnly
-                          value={option.scriptSnippet}
-                          className="min-h-[120px] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-3 text-xs text-[var(--foreground)]"
-                        />
-                      </div>
-                    ) : null}
-
-                    <div className="mt-3 space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--muted)]">json</p>
-                      <textarea
-                        readOnly
-                        value={option.jsonSnippet}
-                        className="min-h-[100px] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--card)] p-3 text-xs text-[var(--foreground)]"
-                      />
-                    </div>
-                  </section>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <div className="mt-4" onClick={(event) => event.stopPropagation()}>{approved && item.publicView ? <VisualCallEditor item={item} /> : null}</div>
       ) : null}
     </article>
   );

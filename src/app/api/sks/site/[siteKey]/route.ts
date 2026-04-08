@@ -6,15 +6,22 @@ import {
   getRecentFailureMessages,
   getSksSiteByKey,
 } from "@/lib/sks/service";
+import { verifySksEmbedFingerprint } from "@/lib/sks/fingerprint";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ siteKey: string }> }
 ) {
   try {
     const { siteKey } = await params;
+    const { searchParams } = new URL(request.url);
+    const fingerprint = String(searchParams.get("fp") || "").trim();
+    const verified = verifySksEmbedFingerprint({ fingerprint, siteKey });
+    if (!verified.valid) {
+      return Response.json({ success: false, error: "无效指纹" }, { status: 403 });
+    }
     const detail = getSksSiteByKey(siteKey);
 
     if (!detail) {
