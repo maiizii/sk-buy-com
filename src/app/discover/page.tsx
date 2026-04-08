@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,6 +13,8 @@ import { getMessages } from "@/lib/i18n";
 import {
   FAVORITES_CHANGED_EVENT,
   FAVORITES_FILTER_CHANGED_EVENT,
+  getFavoritesOnlyFromStorage,
+  subscribeFavoritesOnly,
 } from "@/lib/favorites-client";
 import {
   adaptSiteCatalogRecord,
@@ -634,6 +636,7 @@ export default function DiscoverPage() {
   const [selectedFilters, setSelectedFilters] = useState<Record<FilterKey, string[]>>(createEmptyFilters);
   const [selectedCompareKeys, setSelectedCompareKeys] = useState<string[]>([]);
   const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]);
+  const favoritesOnly = useSyncExternalStore(subscribeFavoritesOnly, getFavoritesOnlyFromStorage, () => false);
   const [noticeMessage, setNoticeMessage] = useState("");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
@@ -881,6 +884,9 @@ export default function DiscoverPage() {
   const filteredSites = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     const result = sites.filter((site) => {
+      const matchesFavorites = !favoritesOnly || favoriteKeys.includes(site.siteKey);
+      if (!matchesFavorites) return false;
+
       const matchesStatus =
         selectedFilters.status.length === 0 || selectedFilters.status.includes(site.displayStatus);
       if (!matchesStatus) return false;
@@ -924,7 +930,7 @@ export default function DiscoverPage() {
     }
 
     return result;
-  }, [sites, keyword, selectedFilters, sortBy]);
+  }, [favoriteKeys, favoritesOnly, sites, keyword, selectedFilters, sortBy]);
 
   const visibleSelectedCompareKeys = useMemo(() => {
     const visibleSiteKeys = new Set(filteredSites.map((site) => site.siteKey));

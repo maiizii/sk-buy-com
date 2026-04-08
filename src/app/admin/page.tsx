@@ -181,6 +181,28 @@ interface SksSiteAdminView {
   } | null;
 }
 
+interface ProxyPoolEntrySafeView {
+  id: string;
+  poolType: "static" | "residential";
+  name: string;
+  protocol: "http" | "https" | "socks5";
+  host: string;
+  port: number;
+  enabled: boolean;
+  priority: number;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+  hasUsername: boolean;
+  hasPassword: boolean;
+  maskedUrl: string;
+}
+
+interface SksProxyConfig {
+  enabled: boolean;
+  selected: ProxyPoolEntrySafeView | null;
+}
+
 const t = getMessages();
 
 const emptyGroupForm: {
@@ -258,6 +280,29 @@ const emptySksEditForm: {
   apiBaseUrl: "",
   statusVisibility: "public",
   ownershipStatus: "unclaimed",
+};
+
+const emptyProxyForm = {
+  id: "",
+  poolType: "static" as "static" | "residential",
+  name: "",
+  protocol: "http" as "http" | "https" | "socks5",
+  host: "",
+  port: 0,
+  username: "",
+  password: "",
+  enabled: true,
+  priority: 100,
+  notes: "",
+};
+
+const emptyProxyTestForm = {
+  entryId: "",
+  targetUrl: "https://api64.ipify.org?format=json",
+  apiBaseUrl: "",
+  apiKey: "",
+  model: "",
+  timeoutMs: 15000,
 };
 
 function parseAdminTimestamp(value: string | null | undefined) {
@@ -394,7 +439,7 @@ function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
   );
 }
 
-type AdminWorkspaceKey = "overview" | "platforms" | "attributes" | "models" | "monitoring" | "sks" | "search";
+type AdminWorkspaceKey = "overview" | "platforms" | "attributes" | "models" | "monitoring" | "proxy" | "sks" | "search";
 
 export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -415,19 +460,30 @@ export default function AdminPage() {
   const [sksDetailLoading, setSksDetailLoading] = useState(false);
   const [siteCatalogActionLoading, setSiteCatalogActionLoading] = useState<"" | "hide" | "restore" | "delete">("");
   const [sksActionLoading, setSksActionLoading] = useState<"" | "edit" | "pause" | "resume" | "delete" | "probe">("");
+  const [proxyEntries, setProxyEntries] = useState<ProxyPoolEntrySafeView[]>([]);
+  const [proxyForm, setProxyForm] = useState(emptyProxyForm);
+  const [proxySaving, setProxySaving] = useState(false);
+  const [proxyTesting, setProxyTesting] = useState(false);
+  const [sksProxyEnabled, setSksProxyEnabled] = useState(false);
+  const [sksProxySaving, setSksProxySaving] = useState(false);
+  const [sksProxySelected, setSksProxySelected] = useState<ProxyPoolEntrySafeView | null>(null);
+  const [proxyTestForm, setProxyTestForm] = useState(emptyProxyTestForm);
+  const [proxyTestResult, setProxyTestResult] = useState<string>("");
 
   const loadDashboard = useCallback(async () => {
-    const [platformRes, configRes, sksRes, siteCatalogRes] = await Promise.all([
+    const [platformRes, configRes, sksRes, siteCatalogRes, proxyRes] = await Promise.all([
       fetch("/api/platforms", { cache: "no-store" }),
       fetch("/api/platforms/config", { cache: "no-store" }),
       fetch("/api/sks/admin/sites", { cache: "no-store" }),
       fetch("/api/site-catalog/admin/sites", { cache: "no-store" }),
+      fetch("/api/admin/proxy-settings", { cache: "no-store" }),
     ]);
-    const [platformData, configData, sksData, siteCatalogData] = await Promise.all([
+    const [platformData, configData, sksData, siteCatalogData, proxyData] = await Promise.all([
       readJsonResponse<{ success: boolean; data: Platform[]; error?: string }>(platformRes, "平台列表接口"),
       readJsonResponse<{ success: boolean; data: ConfigSummary; error?: string }>(configRes, "平台配置接口"),
       readJsonResponse<{ success: boolean; data: SksSiteAdminListItem[]; error?: string }>(sksRes, "SKS 管理列表接口"),
       readJsonResponse<{ success: boolean; data: SiteCatalogAdminRecord[]; error?: string }>(siteCatalogRes, "站点目录接口"),
+      readJsonResponse<{ success: boolean; data: { staticEntries: ProxyPoolEntrySafeView[]; residentialEntries: ProxyPoolEntrySafeView[]; sksProxyConfig: SksProxyConfig }; error?: string }>(proxyRes, "代理设置接口"),
     ]);
     if (platformData.success) setPlatforms(platformData.data);
     if (configData.success) setConfigSummary(configData.data);
@@ -440,6 +496,15 @@ export default function AdminPage() {
       setSiteCatalogSites(siteCatalogData.data);
     } else {
       setSiteCatalogSites([]);
+    }
+    if (proxyData.success) {
+      setProxyEntries([...(proxyData.data.staticEntries || []), ...(proxyData.data.residentialEntries || [])]);
+      setSksProxyEnabled(proxyData.data.sksProxyConfig?.enabled === true);
+      setSksProxySelected(proxyData.data.sksProxyConfig?.selected || null);
+    } else {
+      setProxyEntries([]);
+      setSksProxyEnabled(false);
+      setSksProxySelected(null);
     }
   }, []);
 
@@ -562,6 +627,105 @@ export default function AdminPage() {
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
+  };
+
+  const submitProxyEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProxySaving(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/admin/proxy-settings", {
+        method: proxyForm.id ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(proxyForm),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "保存代理失败");
+      setProxyForm(emptyProxyForm);
+      await loadDashboard();
+      setMessage(proxyForm.id ? "代理已更新" : "代理已创建");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存代理失败");
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const editProxyEntry = (entry: ProxyPoolEntrySafeView) => {
+    setProxyForm({
+      id: entry.id,
+      poolType: entry.poolType,
+      name: entry.name,
+      protocol: entry.protocol,
+      host: entry.host,
+      port: entry.port,
+      username: "",
+      password: "",
+      enabled: entry.enabled,
+      priority: entry.priority,
+      notes: entry.notes || "",
+    });
+    setProxyTestForm((prev) => ({ ...prev, entryId: entry.id }));
+    setActiveWorkspace("proxy");
+  };
+
+  const removeProxyEntry = async (id: string) => {
+    if (!confirm("确认删除该代理吗？")) return;
+    setMessage("");
+    try {
+      const res = await fetch(`/api/admin/proxy-settings?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "删除代理失败");
+      if (proxyForm.id === id) setProxyForm(emptyProxyForm);
+      await loadDashboard();
+      setMessage("代理已删除");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除代理失败");
+    }
+  };
+
+  const runProxyTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProxyTesting(true);
+    setMessage("");
+    setProxyTestResult("");
+    try {
+      const res = await fetch("/api/admin/proxy-settings/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(proxyTestForm),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "代理测试失败");
+      setProxyTestResult(JSON.stringify(data.data, null, 2));
+      setMessage("代理测试已完成");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "代理测试失败");
+    } finally {
+      setProxyTesting(false);
+    }
+  };
+
+  const toggleSksProxy = async (enabled: boolean) => {
+    setSksProxySaving(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/admin/proxy-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_sks_proxy_enabled", enabled }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "更新 SKS 代理开关失败");
+      setSksProxyEnabled(data.data.enabled === true);
+      setSksProxySelected(data.data.selected || null);
+      await loadDashboard();
+      setMessage(enabled ? "SKS 代理已启用" : "SKS 代理已关闭，当前回退为直连");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "更新 SKS 代理开关失败");
+    } finally {
+      setSksProxySaving(false);
+    }
   };
 
   const submitGroup = async (e: React.FormEvent) => {
@@ -945,6 +1109,7 @@ export default function AdminPage() {
     { key: "attributes", title: t.admin.attributeManagement, desc: "当前已可配置分组与标签，作为筛选/对比的基础设施。", icon: Shapes },
     { key: "models", title: t.admin.modelRegistry, desc: "模型数量巨大，建议走独立模型库与平台绑定体系。", icon: Boxes },
     { key: "monitoring", title: t.admin.monitoringCenter, desc: "连通率、延迟将逐步由实测聚合数据自动计算。", icon: Radar },
+    { key: "proxy", title: "代理池", desc: "维护静态代理池与住宅动态代理池，并先做独立测试验证。", icon: Shield },
     { key: "sks", title: "SKS 工作台", desc: "管理用户提交后已收录的 SKS 站点，并在后台做编辑、暂停、恢复与删除。", icon: Activity },
     { key: "search", title: t.admin.searchWorkbench, desc: "前台搜索工作台将由这些配置动态生成。", icon: Settings },
   ];
@@ -1357,6 +1522,102 @@ export default function AdminPage() {
             <li>结果列表列由 isComparable + isVisibleByDefault 控制</li>
             <li>模型维度建议走独立模型库，不与普通标签平铺混用</li>
           </ul>
+        </section>
+      )}
+
+      {activeWorkspace === "proxy" && (
+        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+          <div className="admin-card p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-[var(--accent-strong)]" />
+              <h3 className="text-base font-semibold">代理池录入管理</h3>
+            </div>
+            <form onSubmit={submitProxyEntry} className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-2"><span className="admin-label">代理池类型</span><select className="admin-input" value={proxyForm.poolType} onChange={(e) => setProxyForm((prev) => ({ ...prev, poolType: e.target.value as typeof prev.poolType }))}><option value="static">静态代理池</option><option value="residential">住宅动态代理池</option></select></label>
+              <label className="space-y-2"><span className="admin-label">名称</span><input className="admin-input" value={proxyForm.name} onChange={(e) => setProxyForm((prev) => ({ ...prev, name: e.target.value }))} required /></label>
+              <label className="space-y-2"><span className="admin-label">协议</span><select className="admin-input" value={proxyForm.protocol} onChange={(e) => setProxyForm((prev) => ({ ...prev, protocol: e.target.value as typeof prev.protocol }))}><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select></label>
+              <label className="space-y-2"><span className="admin-label">Host</span><input className="admin-input" value={proxyForm.host} onChange={(e) => setProxyForm((prev) => ({ ...prev, host: e.target.value }))} placeholder="1.2.3.4" required /></label>
+              <label className="space-y-2"><span className="admin-label">Port</span><input type="number" className="admin-input" value={proxyForm.port || ""} onChange={(e) => setProxyForm((prev) => ({ ...prev, port: Number(e.target.value) }))} required /></label>
+              <label className="space-y-2"><span className="admin-label">优先级</span><input type="number" className="admin-input" value={proxyForm.priority} onChange={(e) => setProxyForm((prev) => ({ ...prev, priority: Number(e.target.value) }))} /></label>
+              <label className="space-y-2"><span className="admin-label">用户名</span><input className="admin-input" value={proxyForm.username} onChange={(e) => setProxyForm((prev) => ({ ...prev, username: e.target.value }))} placeholder="无则留空" /></label>
+              <label className="space-y-2"><span className="admin-label">密码</span><input className="admin-input" value={proxyForm.password} onChange={(e) => setProxyForm((prev) => ({ ...prev, password: e.target.value }))} placeholder={proxyForm.id ? "留空表示不更新密码" : "无则留空"} /></label>
+              <label className="space-y-2 md:col-span-2"><span className="admin-label">备注</span><textarea className="admin-input min-h-24" value={proxyForm.notes} onChange={(e) => setProxyForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder="静态代理用于 SKS 检测；住宅动态代理供 sk-buy-tools 使用" /></label>
+              <label className="flex items-center gap-2 rounded-xl border border-[var(--border-color)] px-3 py-2 md:col-span-2"><input type="checkbox" checked={proxyForm.enabled} onChange={(e) => setProxyForm((prev) => ({ ...prev, enabled: e.target.checked }))} /><span>启用该代理</span></label>
+              <div className="md:col-span-2 flex gap-2">
+                <button type="submit" disabled={proxySaving} className="btn-glass btn-glass-primary">{proxyForm.id ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}{proxyForm.id ? "保存代理" : "新增代理"}</button>
+                <button type="button" className="btn-glass" onClick={() => setProxyForm(emptyProxyForm)}>重置</button>
+              </div>
+            </form>
+          </div>
+
+          <div className="space-y-6">
+            <section className="admin-card p-6 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold">静态代理测试</h3>
+                  <p className="mt-1 text-sm text-[var(--muted)]">先独立验证代理出口 IP、模型列表与 1-token 推理，不改现有业务接线。</p>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--background)]/40 p-4 text-sm space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">SKS 代理开关</p>
+                    <p className="mt-1 text-xs text-[var(--muted)]">控制 SKS 网站连通检测、模型列表与 1-token 推理是否走静态代理池。</p>
+                  </div>
+                  <label className="flex items-center gap-2 rounded-xl border border-[var(--border-color)] px-3 py-2">
+                    <input type="checkbox" checked={sksProxyEnabled} disabled={sksProxySaving} onChange={(e) => toggleSksProxy(e.target.checked)} />
+                    <span>{sksProxyEnabled ? "已启用" : "已关闭"}</span>
+                  </label>
+                </div>
+                <p className="text-xs text-[var(--muted)]">当前生效代理：<span className="text-[var(--foreground)]">{sksProxySelected?.maskedUrl || (sksProxyEnabled ? "未找到已启用静态代理" : "direct")}</span></p>
+              </div>
+              <form onSubmit={runProxyTest} className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 md:col-span-2"><span className="admin-label">测试代理</span><select className="admin-input" value={proxyTestForm.entryId} onChange={(e) => setProxyTestForm((prev) => ({ ...prev, entryId: e.target.value }))} required><option value="">请选择代理</option>{proxyEntries.filter((entry) => entry.poolType === "static").map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {entry.maskedUrl}</option>)}</select></label>
+                <label className="space-y-2 md:col-span-2"><span className="admin-label">IP 回显地址</span><input className="admin-input" value={proxyTestForm.targetUrl} onChange={(e) => setProxyTestForm((prev) => ({ ...prev, targetUrl: e.target.value }))} /></label>
+                <label className="space-y-2 md:col-span-2"><span className="admin-label">API Base URL</span><input className="admin-input" value={proxyTestForm.apiBaseUrl} onChange={(e) => setProxyTestForm((prev) => ({ ...prev, apiBaseUrl: e.target.value }))} placeholder="用于 /v1/models 与 1-token 测试" /></label>
+                <label className="space-y-2 md:col-span-2"><span className="admin-label">API Key</span><input className="admin-input" value={proxyTestForm.apiKey} onChange={(e) => setProxyTestForm((prev) => ({ ...prev, apiKey: e.target.value }))} placeholder="仅测试时使用，不会入库" /></label>
+                <label className="space-y-2"><span className="admin-label">模型名</span><input className="admin-input" value={proxyTestForm.model} onChange={(e) => setProxyTestForm((prev) => ({ ...prev, model: e.target.value }))} placeholder="可选，做 1-token 推理" /></label>
+                <label className="space-y-2"><span className="admin-label">超时毫秒</span><input type="number" className="admin-input" value={proxyTestForm.timeoutMs} onChange={(e) => setProxyTestForm((prev) => ({ ...prev, timeoutMs: Number(e.target.value) }))} /></label>
+                <div className="md:col-span-2 flex gap-2">
+                  <button type="submit" disabled={proxyTesting} className="btn-glass btn-glass-primary">{proxyTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}开始测试</button>
+                </div>
+              </form>
+              {proxyTestResult ? <pre className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--background)]/50 p-4 text-xs leading-6 text-[var(--muted)]">{proxyTestResult}</pre> : null}
+              <p className="text-xs leading-6 text-[var(--muted)]">命令行也可使用：npm run proxy:test-static -- --proxy-url=http://user:pass@host:port</p>
+            </section>
+
+            <section className="admin-card p-6 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold">代理池列表</h3>
+                <button type="button" className="btn-glass" onClick={() => loadDashboard().catch(console.error)}><RefreshCw className="h-4 w-4" />刷新</button>
+              </div>
+              <div className="grid gap-3">
+                {proxyEntries.map((entry) => (
+                  <div key={entry.id} className="rounded-2xl border border-[var(--border-color)] p-4 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{entry.name}</p>
+                        <p className="mt-1 text-xs text-[var(--muted)]">{entry.poolType === "static" ? "静态代理池" : "住宅动态代理池"} · {entry.protocol}</p>
+                      </div>
+                      <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[10px] text-[var(--muted)]">{entry.enabled ? "启用" : "停用"}</span>
+                    </div>
+                    <div className="mt-3 space-y-1 text-xs text-[var(--muted)]">
+                      <p className="break-all">地址：<span className="text-[var(--foreground)]">{entry.maskedUrl}</span></p>
+                      <p>优先级：<span className="text-[var(--foreground)]">{entry.priority}</span></p>
+                      <p>凭据：<span className="text-[var(--foreground)]">{entry.hasUsername ? "已配置账号" : "无账号"}</span></p>
+                      <p>备注：<span className="text-[var(--foreground)]">{entry.notes || "—"}</span></p>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" className="btn-glass" onClick={() => editProxyEntry(entry)}><Pencil className="h-4 w-4" />编辑</button>
+                      <button type="button" className="btn-glass" onClick={() => setProxyTestForm((prev) => ({ ...prev, entryId: entry.id }))}><RefreshCw className="h-4 w-4" />设为测试目标</button>
+                      <button type="button" className="btn-glass" onClick={() => removeProxyEntry(entry.id)}><Trash2 className="h-4 w-4" />删除</button>
+                    </div>
+                  </div>
+                ))}
+                {proxyEntries.length === 0 ? <p className="text-sm text-[var(--muted)]">当前还没有代理记录，先各录入一条即可。</p> : null}
+              </div>
+            </section>
+          </div>
         </section>
       )}
 
