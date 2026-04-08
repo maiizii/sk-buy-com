@@ -3,8 +3,6 @@ import {
   getHourlyConnectivityLogs,
   getConnectivitySummary,
 } from "@/lib/db";
-// Side-effect import: starts the monitor loop on first server-side load
-import "@/lib/monitor";
 
 export async function GET() {
   try {

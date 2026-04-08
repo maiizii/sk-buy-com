@@ -27,6 +27,8 @@ import {
 
 const SKS_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_ERROR_MESSAGE_LENGTH = 300;
+const SKS_FAILURE_RETRY_TIMES = 3;
+const SKS_FAILURE_RETRY_DELAY_MS = 8_000;
 
 interface TimedFetchResponse {
   ok: boolean;
@@ -42,6 +44,11 @@ interface TimedFetchResult {
   responseJson: unknown;
   errorMessage: string | null;
   errorType: string | null;
+}
+
+interface RetryableTimedFetchResult {
+  fetchResult: TimedFetchResult;
+  attempts: number;
 }
 
 function truncateText(value: string | null | undefined, limit: number = MAX_ERROR_MESSAGE_LENGTH) {
@@ -105,6 +112,12 @@ function normalizeFailureStatus(
   return "unknown";
 }
 
+function waitForRetryDelay(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function timedFetch(
   url: string,
   init: {
@@ -150,6 +163,46 @@ async function timedFetch(
       errorType: isTimeout ? "timeout" : "network_error",
     };
   }
+}
+
+async function timedFetchWithFailureRetry(
+  url: string,
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  }
+): Promise<RetryableTimedFetchResult> {
+  let currentAttempt = 0;
+  let lastResult: TimedFetchResult | null = null;
+
+  while (currentAttempt <= SKS_FAILURE_RETRY_TIMES) {
+    currentAttempt += 1;
+    const fetchResult = await timedFetch(url, init);
+    lastResult = fetchResult;
+
+    if (fetchResult.response?.ok) {
+      return { fetchResult, attempts: currentAttempt };
+    }
+
+    if (currentAttempt <= SKS_FAILURE_RETRY_TIMES) {
+      await waitForRetryDelay(SKS_FAILURE_RETRY_DELAY_MS);
+    }
+  }
+
+  return {
+    fetchResult:
+      lastResult || {
+        response: null,
+        ttfbMs: null,
+        totalMs: 0,
+        responseText: "",
+        responseJson: null,
+        errorMessage: "请求失败",
+        errorType: "network_error",
+      },
+    attempts: currentAttempt,
+  };
 }
 
 function extractModelNames(payload: unknown) {
@@ -281,7 +334,7 @@ export async function syncSksSiteModels(
   });
   const modelsUrl = buildOpenAiUrl(resolvedCredential.record.apiBaseUrl, "models");
 
-  const fetchResult = await timedFetch(modelsUrl, {
+  const { fetchResult, attempts } = await timedFetchWithFailureRetry(modelsUrl, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${resolvedCredential.apiKey}`,
@@ -312,18 +365,20 @@ export async function syncSksSiteModels(
       fetchResult.responseJson,
       fetchResult.errorMessage || fetchResult.response?.statusText || "模型列表请求失败"
     );
+    const finalErrorMessage =
+      attempts > 1 ? `${errorMessage}（已重试 ${attempts - 1} 次）` : errorMessage;
 
     probe = saveProbeAndCredentialOutcome({
       siteId: site.id,
       credentialId: resolvedCredential.record.id,
       probeType: "model_list",
-      status: normalizeFailureStatus(httpStatus, errorMessage),
+      status: normalizeFailureStatus(httpStatus, finalErrorMessage),
       httpStatus,
       ttfbMs: fetchResult.ttfbMs,
       totalMs: fetchResult.totalMs,
       responseChars: fetchResult.responseText.length,
       errorType: fetchResult.errorType,
-      errorMessage,
+      errorMessage: finalErrorMessage,
     });
   }
 
@@ -354,7 +409,7 @@ export async function testSksModel(
   upsertSksSiteModels(site.id, [...existingModels, normalizedModelName]);
 
   const chatUrl = buildOpenAiUrl(resolvedCredential.record.apiBaseUrl, "chat/completions");
-  const fetchResult = await timedFetch(chatUrl, {
+  const { fetchResult, attempts } = await timedFetchWithFailureRetry(chatUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -389,19 +444,21 @@ export async function testSksModel(
       fetchResult.responseJson,
       fetchResult.errorMessage || fetchResult.response?.statusText || "模型测试失败"
     );
+    const finalErrorMessage =
+      attempts > 1 ? `${errorMessage}（已重试 ${attempts - 1} 次）` : errorMessage;
 
     probe = saveProbeAndCredentialOutcome({
       siteId: site.id,
       credentialId: resolvedCredential.record.id,
       probeType: "model_inference",
       modelName: normalizedModelName,
-      status: normalizeFailureStatus(httpStatus, errorMessage, normalizedModelName),
+      status: normalizeFailureStatus(httpStatus, finalErrorMessage, normalizedModelName),
       httpStatus,
       ttfbMs: fetchResult.ttfbMs,
       totalMs: fetchResult.totalMs,
       responseChars: fetchResult.responseText.length,
       errorType: fetchResult.errorType,
-      errorMessage,
+      errorMessage: finalErrorMessage,
     });
   }
 

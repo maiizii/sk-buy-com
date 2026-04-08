@@ -6,8 +6,6 @@ import {
   updatePlatform,
 } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-// Side-effect: auto-starts the connectivity monitor loop
-import "@/lib/monitor";
 
 export async function GET() {
   try {

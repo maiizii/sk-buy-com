@@ -145,26 +145,3 @@ export function stopMonitorLoop(): void {
     console.log("[Monitor] Loop stopped.");
   }
 }
-
-// ============================================================
-// Auto-start (skip during build)
-// ============================================================
-function isBuildRuntime() {
-  const lifecycleEvent = process.env.npm_lifecycle_event?.toLowerCase() || "";
-  const nextPhase = process.env.NEXT_PHASE?.toLowerCase() || "";
-  const argv = process.argv.join(" ").toLowerCase();
-
-  return (
-    lifecycleEvent === "build" ||
-    nextPhase.includes("build") ||
-    Boolean(process.env.__NEXT_PRIVATE_BUILD_WORKER) ||
-    argv.includes("next build")
-  );
-}
-
-if (!isBuildRuntime()) {
-  // Use a small delay to avoid blocking module initialization
-  setTimeout(() => {
-    startMonitorLoop();
-  }, 3000);
-}

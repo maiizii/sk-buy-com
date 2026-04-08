@@ -31,6 +31,7 @@
 - [x] 管理端导入入口已切到 `site-catalog -> sks` 新链路
 - [x] `sk-buy-tools` 新增推送脚本：`shared/push-site-catalog.mjs`
 - [x] 已补对接文档：`docs/site-catalog-sync.md`
+- [x] 旧版 `/api/platforms` / `/api/connectivity` 的自动连通性轮询已停用，仅保留按需手动触发
 
 ---
 
@@ -108,6 +109,7 @@
 
 ### 3.1 旧结构盘点
 - [ ] 盘点 `platforms`、`platform_attribute_*`、`platform_models`、`connectivity_logs` 的实际依赖
+- [x] 已确认 `connectivity_logs` 属于旧版后台录入链路，定时监控已关闭（避免与 SKS 自动检测并行）
 - [ ] 标记哪些表：
   - 保留只读
   - 冻结不用
