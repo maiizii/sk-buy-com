@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { SksCallTemplateKey, SksUserSubmissionView } from "@/lib/sks/types";
-import { formatCheckedAt, formatLatency, getStatusLabel, SksStatusPill } from "@/components/sks/SksUi";
+import { formatCheckedAt, SksStatusPill } from "@/components/sks/SksUi";
 import { emitFavoritesChanged } from "@/lib/favorites-client";
 
 function statusToPillStatus(item: SksUserSubmissionView) {
@@ -48,22 +48,19 @@ const VISUAL_TEMPLATE_META: Record<
     label: "大屏",
     description: "大屏展示模式，建议新页面单独预览。",
     defaultLength: 1280,
-    iframeHeight: 620,
-    samePagePreview: false,
+    iframeHeight: 900,
+    samePagePreview: true,
   },
 };
 
 function buildWidgetPreviewUrl(siteKey: string, template: VisualTemplate, length: number) {
   const encodedSiteKey = encodeURIComponent(siteKey);
   const base = `/api/sks/widget/${encodedSiteKey}?template=${template}`;
-  if (template === "site-card-large" || template === "site-card-compact") {
-    return `${base}&length=${Math.max(120, Math.min(2000, Math.trunc(length || 0)))}`;
-  }
-  return base;
+  return `${base}&length=${Math.max(120, Math.min(2000, Math.trunc(length || 0)))}`;
 }
 
 function buildIframeScriptSnippet(iframeUrl: string, height: number, length: number) {
-  return [
+  const scriptBody = [
     "const container = document.querySelector('#sks-widget');",
     "const iframe = document.createElement('iframe');",
     `iframe.src = ${JSON.stringify(iframeUrl)};`,
@@ -76,6 +73,8 @@ function buildIframeScriptSnippet(iframeUrl: string, height: number, length: num
     "iframe.style.overflow = 'hidden';",
     "container?.appendChild(iframe);",
   ].join("\n");
+
+  return [`<script>`, scriptBody, `</script>`].join("\n");
 }
 
 function buildJsonSnippet(jsonUrl: string) {
@@ -89,14 +88,12 @@ function buildJsonSnippet(jsonUrl: string) {
 }
 
 function VisualCallEditor({ item }: { item: SksUserSubmissionView }) {
-  if (!item.publicView) return null;
-
-  const siteKey = item.publicView.site.normalizedHostname || item.publicView.site.id;
+  const publicView = item.publicView;
+  const siteKey = publicView?.site.normalizedHostname || publicView?.site.id || "";
   const encodedSiteKey = encodeURIComponent(siteKey);
   const [template, setTemplate] = useState<VisualTemplate>("site-card-large");
   const [lengthInput, setLengthInput] = useState<string>(String(VISUAL_TEMPLATE_META["site-card-large"].defaultLength));
   const [showCode, setShowCode] = useState(false);
-  const [origin, setOrigin] = useState("");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [previewHeight, setPreviewHeight] = useState<number>(VISUAL_TEMPLATE_META["site-card-large"].iframeHeight);
 
@@ -108,30 +105,20 @@ function VisualCallEditor({ item }: { item: SksUserSubmissionView }) {
   const fingerprint = item.callOptions[0]?.fingerprint || "";
   const relativeJsonUrl = `/api/sks/site/${encodedSiteKey}?fp=${encodeURIComponent(fingerprint)}`;
   const relativePreviewUrl = `${buildWidgetPreviewUrl(siteKey, template, effectiveLength)}&fp=${encodeURIComponent(fingerprint)}`;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   const jsonUrl = origin ? `${origin}${relativeJsonUrl}` : relativeJsonUrl;
   const previewUrl = origin ? `${origin}${relativePreviewUrl}` : relativePreviewUrl;
   const iframeSnippet =
-    template === "full-card"
-      ? null
-      : `<iframe src="${previewUrl}" loading="lazy" style="width:${effectiveLength}px;max-width:100%;height:${templateMeta.iframeHeight}px;border:0;border-radius:16px;overflow:hidden;"></iframe>`;
+    `<iframe src="${previewUrl}" loading="lazy" style="width:${effectiveLength}px;max-width:100%;height:${templateMeta.iframeHeight}px;border:0;border-radius:16px;overflow:hidden;"></iframe>`;
   const scriptSnippet =
-    template === "full-card"
-      ? null
-      : buildIframeScriptSnippet(previewUrl, templateMeta.iframeHeight, effectiveLength);
+    buildIframeScriptSnippet(previewUrl, templateMeta.iframeHeight, effectiveLength);
   const jsonSnippet = useMemo(() => buildJsonSnippet(jsonUrl), [jsonUrl]);
-
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
-
-  useEffect(() => {
-    setPreviewHeight(templateMeta.iframeHeight);
-  }, [template, templateMeta.iframeHeight, previewUrl]);
 
   useEffect(() => {
     if (!templateMeta.samePagePreview) return;
     let stopped = false;
-    const maxPreviewHeight = template === "site-card-large" ? 560 : 520;
+    const maxPreviewHeight =
+      template === "full-card" ? 1600 : template === "site-card-large" ? 560 : 520;
     const tick = () => {
       if (stopped) return;
       const frame = iframeRef.current;
@@ -153,6 +140,8 @@ function VisualCallEditor({ item }: { item: SksUserSubmissionView }) {
       window.clearInterval(timer);
     };
   }, [template, templateMeta.samePagePreview, templateMeta.iframeHeight, previewUrl]);
+
+  if (!publicView) return null;
 
   return (
     <div className="space-y-4 rounded-2xl border border-[var(--border-color)] bg-[var(--card-hover)] p-4">

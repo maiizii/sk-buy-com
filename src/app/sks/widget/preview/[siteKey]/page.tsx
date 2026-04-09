@@ -108,7 +108,7 @@ export default async function SksWidgetPreviewPage({
             title={`sks-preview-${detail.site.id}-${template}`}
             src={widgetPreviewUrl}
             className="w-full"
-            style={{ border: 0, height: template === "full-card" ? 700 : 360, borderRadius: 12 }}
+            style={{ border: 0, height: template === "full-card" ? 980 : 360, borderRadius: 12 }}
           />
         </div>
       </section>
